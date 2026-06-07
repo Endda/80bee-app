@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Broad filter to catch Android devices in ADB/MTP/Fastboot modes -->
+    <!-- ADB class interface -->
+    <usb-device class="255" subclass="66" protocol="1" />
+    <usb-device class="255" subclass="66" protocol="3" />
+</resources>
