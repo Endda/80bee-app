@@ -22,3 +22,6 @@ keystore.properties
 
 # Reference directories
 fastboot_ref/
+
+# Temporary key files
+keystore_base64.txt
