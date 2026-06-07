@@ -28,3 +28,6 @@ keystore_base64.txt
 
 # Local documentation
 docs/
+
+# Build log files
+build_log.txt
