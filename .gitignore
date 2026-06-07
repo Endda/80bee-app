@@ -1,0 +1,24 @@
+*.class
+*.log
+
+# Android Studio / IntelliJ files
+.idea/
+*.iml
+.gradle/
+local.properties
+
+# Build outputs
+build/
+app/build/
+adblib/build/
+*.apk
+*.ap_
+*.aab
+
+# Signing keys and properties (CRITICAL for security)
+*.jks
+*.keystore
+keystore.properties
+
+# Reference directories
+fastboot_ref/
