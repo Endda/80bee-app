@@ -21,7 +21,6 @@ The application operates in two modes:
 *   **🔋 Battery Optimizer:** Manage adaptive battery status, toggle deep Doze modes, and adjust background service configurations.
 *   **📦 Debloater Manager:** Uninstall, disable, or re-enable pre-installed system apps and bloatware (`pm disable` / `pm uninstall`).
 *   **📥 Sideload Bypass:** Sideload APK files and bypass Android's target SDK limitations (e.g., installing legacy apps on Android 14+).
-*   **🛠️ Pixel Magisk Tool (OTG only):** Fastboot interface for Google Pixel devices to flash `init_boot` and `boot` images for easy patching.
 
 ---
 
