@@ -11,6 +11,9 @@ The application operates in two modes:
 1. **Local Mode (Standalone):** Runs on your own device, utilizing the [Shizuku API](https://shizuku.rikka.app/) to execute system-level commands and modify device configurations without requiring root access.
 2. **OTG Host Mode (Device-to-Device):** When connected to another Android device via a USB OTG cable, it turns your device into an ADB/Fastboot host to debug, configure, or flash the connected client device.
 
+**Note** I am a web developer at heart, but building native Android apps are way outside of my skillset.
+So while I'm learning the ropes, this APK file is being developed with LLM editors (Antigravity, Claude, Codex)
+I research, test, and implement the features on the 80bee.com website. . .then those features get ported to the native app.
 ---
 
 ## 🚀 Key Features
