@@ -25,3 +25,6 @@ fastboot_ref/
 
 # Temporary key files
 keystore_base64.txt
+
+# Local documentation
+docs/
