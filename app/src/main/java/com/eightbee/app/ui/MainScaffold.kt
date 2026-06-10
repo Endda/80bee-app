@@ -9,8 +9,10 @@ import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import android.net.Uri
 
 sealed class NavItem(val title: String, val icon: @Composable () -> Unit) {
+
     object Home : NavItem("Home", { Icon(Icons.Filled.Home, contentDescription = "Home") })
     object Advanced : NavItem("Advanced", { Icon(Icons.Filled.Build, contentDescription = "Advanced") })
     object About : NavItem("About", { Icon(Icons.Filled.Settings, contentDescription = "About") })
@@ -53,7 +55,9 @@ fun HomeTab(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 @Composable
 fun AdvancedTab(viewModel: MainViewModel) {
     var showDebloater by remember { mutableStateOf(false) }
+    var showSideloadSheet by remember { mutableStateOf(false) }
     val connectionManager = viewModel.activeConnection.collectAsState().value ?: return
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     if (showDebloater) {
         DebloaterScreen(connectionManager, onBack = { showDebloater = false })
@@ -63,10 +67,20 @@ fun AdvancedTab(viewModel: MainViewModel) {
             Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
             AdvancedAppManagerCard(
                 onOpenDebloater = { showDebloater = true },
-                connectionManager = connectionManager,
-                onOutput = { viewModel.executeCommand("echo \"$it\"") } // Hacky way to update output console
+                onApkPicked = { uri ->
+                    viewModel.startSideload(context, uri)
+                    showSideloadSheet = true
+                }
             )
         }
+    }
+
+    if (showSideloadSheet) {
+        SideloadBottomSheet(
+            viewModel = viewModel,
+            connectionManager = connectionManager,
+            onDismiss = { showSideloadSheet = false }
+        )
     }
 }
 

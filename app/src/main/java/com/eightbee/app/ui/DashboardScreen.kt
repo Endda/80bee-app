@@ -102,40 +102,12 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 @Composable
 fun AdvancedAppManagerCard(
     onOpenDebloater: () -> Unit,
-    connectionManager: ConnectionManager,
-    onOutput: (String) -> Unit
+    onApkPicked: (Uri) -> Unit
 ) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let {
-            coroutineScope.launch {
-                onOutput("Sideloading APK...")
-                try {
-                    val contentResolver = context.contentResolver
-                    val fileDescriptor = contentResolver.openAssetFileDescriptor(it, "r")
-                    val fileSize = fileDescriptor?.length ?: -1L
-                    fileDescriptor?.close()
-
-                    if (fileSize > 0) {
-                        contentResolver.openInputStream(it)?.use { inputStream ->
-                            val result = connectionManager.runShellCommandWithInput(
-                                "cmd package install --bypass-low-target-sdk-block -S $fileSize",
-                                inputStream
-                            )
-                            onOutput(result.ifBlank { "Install completed." })
-                        }
-                    } else {
-                        onOutput("Error: Could not determine file size.")
-                    }
-                } catch (e: Exception) {
-                    onOutput("Error: ${e.message}")
-                }
-            }
-        }
+        uri?.let { onApkPicked(it) }
     }
 
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -144,7 +116,10 @@ fun AdvancedAppManagerCard(
             Spacer(modifier = Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onOpenDebloater, modifier = Modifier.weight(1f)) { Text("Debloater") }
-                FilledTonalButton(onClick = { filePickerLauncher.launch("application/vnd.android.package-archive") }, modifier = Modifier.weight(1f)) { 
+                FilledTonalButton(
+                    onClick = { filePickerLauncher.launch("*/*") }, 
+                    modifier = Modifier.weight(1f)
+                ) { 
                     Text("Sideload") 
                 }
             }

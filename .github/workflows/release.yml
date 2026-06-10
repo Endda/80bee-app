@@ -44,13 +44,14 @@ jobs:
       - name: Grant Execute Permission to Gradlew
         run: chmod +x gradlew
 
-      - name: Build Release APK
-        run: ./gradlew :app:assembleRelease
+      - name: Build Release APK and AAB
+        run: ./gradlew :app:bundleRelease :app:assembleRelease
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            app/build/outputs/apk/release/*.apk
+            files: |
+              app/build/outputs/apk/release/*.apk
+              app/build/outputs/bundle/release/*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
