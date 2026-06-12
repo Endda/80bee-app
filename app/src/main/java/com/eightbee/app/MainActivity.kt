@@ -1,6 +1,7 @@
 package com.eightbee.app
 
 import android.app.PendingIntent
+import android.util.Log
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -20,8 +21,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.eightbee.app.connection.OtgConnectionManager
 import com.eightbee.app.connection.ShizukuConnectionManager
+import androidx.compose.foundation.layout.Box
 import com.eightbee.app.ui.DeviceDetectionScreen
 import com.eightbee.app.ui.MainScaffold
+import com.eightbee.app.ui.BootloaderWizardBottomSheet
 import com.eightbee.app.ui.theme.EightBeeAppTheme
 
 class MainActivity : ComponentActivity() {
@@ -48,6 +51,9 @@ class MainActivity : ComponentActivity() {
                                 otgManager.setDevice(it)
                                 if (viewModel.activeConnection.value is OtgConnectionManager) {
                                     viewModel.refreshSettings()
+                                }
+                                if (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle) {
+                                    viewModel.setActiveConnection(otgManager)
                                 }
                             }
                         }
@@ -85,25 +91,37 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val activeConnection by viewModel.activeConnection.collectAsState()
+                    val bootloaderWizardState by viewModel.bootloaderWizardState.collectAsState()
 
-                    if (activeConnection == null) {
-                        DeviceDetectionScreen(
-                            shizukuManager = shizukuManager,
-                            otgManager = otgManager,
-                            onRequestShizukuPermission = {
-                                shizukuManager.requestPermission(SHIZUKU_REQUEST_CODE)
-                            },
-                            onConnect = { connection ->
-                                viewModel.setActiveConnection(connection)
-                            }
-                        )
-                    } else {
-                        MainScaffold(
-                            viewModel = viewModel,
-                            onDisconnect = {
-                                viewModel.setActiveConnection(null)
-                            }
-                        )
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (activeConnection == null) {
+                            DeviceDetectionScreen(
+                                shizukuManager = shizukuManager,
+                                otgManager = otgManager,
+                                onRequestShizukuPermission = {
+                                    shizukuManager.requestPermission(SHIZUKU_REQUEST_CODE)
+                                },
+                                onConnect = { connection ->
+                                    viewModel.setActiveConnection(connection)
+                                }
+                            )
+                        } else {
+                            MainScaffold(
+                                viewModel = viewModel,
+                                onDisconnect = {
+                                    viewModel.setActiveConnection(null)
+                                }
+                            )
+                        }
+
+                        if (bootloaderWizardState !is BootloaderWizardState.Idle) {
+                            BootloaderWizardBottomSheet(
+                                viewModel = viewModel,
+                                onDismiss = {
+                                    viewModel.clearBootloaderWizardState()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -115,7 +133,7 @@ class MainActivity : ComponentActivity() {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_NOT_EXPORTED else 0
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_EXPORTED else 0
         registerReceiver(usbReceiver, filter, flags)
     }
 
@@ -127,10 +145,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleUsbDevice(device: UsbDevice) {
+        Log.d("MainActivity", "handleUsbDevice: Inspecting device: Vendor=${device.vendorId}, Product=${device.productId}")
         // Quick check to see if it might be an ADB or Fastboot device
         var isAdbOrFastboot = false
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
+            Log.d("MainActivity", "  Interface $i: class=${intf.interfaceClass}, subclass=${intf.interfaceSubclass}, protocol=${intf.interfaceProtocol}")
             if (intf.interfaceClass == 255 && intf.interfaceSubclass == 66 && 
                 (intf.interfaceProtocol == 1 || intf.interfaceProtocol == 3)) {
                 isAdbOrFastboot = true
@@ -139,12 +159,17 @@ class MainActivity : ComponentActivity() {
         }
 
         if (isAdbOrFastboot) {
+            Log.d("MainActivity", "  Device matches ADB/Fastboot interface! Has permission: ${usbManager.hasPermission(device)}")
             if (usbManager.hasPermission(device)) {
                 otgManager.setDevice(device)
                 if (viewModel.activeConnection.value is OtgConnectionManager) {
                     viewModel.refreshSettings()
                 }
+                if (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle) {
+                    viewModel.setActiveConnection(otgManager)
+                }
             } else {
+                Log.d("MainActivity", "  Requesting USB permission...")
                 val intent = Intent(ACTION_USB_PERMISSION).apply {
                     setPackage(packageName)
                 }
@@ -154,6 +179,22 @@ class MainActivity : ComponentActivity() {
                 )
                 usbManager.requestPermission(device, permissionIntent)
             }
+        } else {
+            Log.d("MainActivity", "  Device does NOT match ADB/Fastboot interfaces.")
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (UsbManager.ACTION_USB_DEVICE_ATTACHED == intent.action) {
+            val device: UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            }
+            device?.let { handleUsbDevice(it) }
         }
     }
 

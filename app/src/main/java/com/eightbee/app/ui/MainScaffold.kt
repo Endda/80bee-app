@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.connection.OtgConnectionManager
 import android.net.Uri
 
 sealed class NavItem(val title: String, val icon: @Composable () -> Unit) {
@@ -72,6 +73,13 @@ fun AdvancedTab(viewModel: MainViewModel) {
                     showSideloadSheet = true
                 }
             )
+            if (connectionManager is OtgConnectionManager) {
+                Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
+                BootloaderUtilitiesCard(
+                    onUnlockClicked = { viewModel.startBootloaderWizard(isUnlock = true) },
+                    onLockClicked = { viewModel.startBootloaderWizard(isUnlock = false) }
+                )
+            }
         }
     }
 
@@ -81,6 +89,42 @@ fun AdvancedTab(viewModel: MainViewModel) {
             connectionManager = connectionManager,
             onDismiss = { showSideloadSheet = false }
         )
+    }
+}
+
+@Composable
+fun BootloaderUtilitiesCard(
+    onUnlockClicked: () -> Unit,
+    onLockClicked: () -> Unit
+) {
+    ElevatedCard(modifier = androidx.compose.ui.Modifier.fillMaxWidth()) {
+        Column(modifier = androidx.compose.ui.Modifier.padding(16.dp)) {
+            Text(text = "Bootloader Utilities", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = androidx.compose.ui.Modifier.height(8.dp))
+            Text(
+                text = "Unlock or relock the bootloader of the connected phone via USB OTG. Requires device reboot and physical confirmation.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
+            Row(
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onUnlockClicked,
+                    modifier = androidx.compose.ui.Modifier.weight(1f)
+                ) {
+                    Text("Unlock Bootloader")
+                }
+                FilledTonalButton(
+                    onClick = onLockClicked,
+                    modifier = androidx.compose.ui.Modifier.weight(1f)
+                ) {
+                    Text("Lock Bootloader")
+                }
+            }
+        }
     }
 }
 
