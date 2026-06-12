@@ -133,7 +133,7 @@ class OtgConnectionManager(
                 }
 
                 // Samsung-specific: Try to set configuration if multiple exist
-                if (device.configurationCount > 0) {
+                if (device.configurationCount > 1) {
                     connection.setConfiguration(device.getConfiguration(0))
                 }
 

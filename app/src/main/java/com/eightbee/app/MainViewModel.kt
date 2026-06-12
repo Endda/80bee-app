@@ -98,6 +98,121 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    private val _bootloaderWizardState = MutableStateFlow<BootloaderWizardState>(BootloaderWizardState.Idle)
+    val bootloaderWizardState: StateFlow<BootloaderWizardState> = _bootloaderWizardState.asStateFlow()
+
+    fun startBootloaderWizard(isUnlock: Boolean) {
+        _bootloaderWizardState.value = BootloaderWizardState.ConfirmingWarnings(isUnlock)
+    }
+
+    fun clearBootloaderWizardState() {
+        _bootloaderWizardState.value = BootloaderWizardState.Idle
+    }
+
+    fun proceedFromWarnings() {
+        val currentState = _bootloaderWizardState.value as? BootloaderWizardState.ConfirmingWarnings ?: return
+        val isUnlock = currentState.isUnlock
+        _bootloaderWizardState.value = BootloaderWizardState.Rebooting(isUnlock)
+
+        viewModelScope.launch {
+            _output.value = "Sending reboot to bootloader command..."
+            val connection = _activeConnection.value
+            if (connection != null && connection.isAvailable()) {
+                val result = connection.runShellCommand("reboot bootloader")
+                _output.value = "Reboot command output: $result"
+            }
+            _bootloaderWizardState.value = BootloaderWizardState.WaitingForFastboot(isUnlock)
+        }
+    }
+
+    fun transitionToCommandSelection() {
+        val currentState = _bootloaderWizardState.value as? BootloaderWizardState.WaitingForFastboot ?: return
+        val isUnlock = currentState.isUnlock
+        val options = if (isUnlock) {
+            listOf("flashing unlock", "oem unlock")
+        } else {
+            listOf("flashing lock", "oem lock")
+        }
+        _bootloaderWizardState.value = BootloaderWizardState.CommandSelection(
+            isUnlock = isUnlock,
+            commandOptions = options,
+            customCommand = ""
+        )
+    }
+
+    fun proceedFromCommandSelection(command: String) {
+        val currentState = _bootloaderWizardState.value as? BootloaderWizardState.CommandSelection ?: return
+        _bootloaderWizardState.value = BootloaderWizardState.ConfirmingExecution(
+            isUnlock = currentState.isUnlock,
+            command = command
+        )
+    }
+
+    fun goBackToCommandSelection() {
+        val currentState = _bootloaderWizardState.value
+        val isUnlock = when (currentState) {
+            is BootloaderWizardState.ConfirmingExecution -> currentState.isUnlock
+            is BootloaderWizardState.ExecutingCommand -> currentState.isUnlock
+            else -> return
+        }
+        val options = if (isUnlock) {
+            listOf("flashing unlock", "oem unlock")
+        } else {
+            listOf("flashing lock", "oem lock")
+        }
+        _bootloaderWizardState.value = BootloaderWizardState.CommandSelection(
+            isUnlock = isUnlock,
+            commandOptions = options,
+            customCommand = ""
+        )
+    }
+
+    fun confirmAndExecuteBootloaderCommand() {
+        val currentState = _bootloaderWizardState.value as? BootloaderWizardState.ConfirmingExecution ?: return
+        val isUnlock = currentState.isUnlock
+        val command = currentState.command
+        _bootloaderWizardState.value = BootloaderWizardState.ExecutingCommand(isUnlock, command)
+
+        viewModelScope.launch {
+            val connection = _activeConnection.value
+            if (connection == null) {
+                _bootloaderWizardState.value = BootloaderWizardState.Finished(
+                    isUnlock = isUnlock,
+                    success = false,
+                    message = "Error: Connection lost. Ensure device is plugged in."
+                )
+                return@launch
+            }
+
+            _output.value = "Executing fastboot command: $command..."
+            val result = connection.sendFastbootCommand(command)
+            _output.value = "Fastboot output: $result"
+
+            if (result.contains("OKAY", ignoreCase = true)) {
+                _bootloaderWizardState.value = BootloaderWizardState.PhysicalConfirmationPrompt(
+                    isUnlock = isUnlock,
+                    command = command,
+                    responseText = result
+                )
+            } else {
+                _bootloaderWizardState.value = BootloaderWizardState.Finished(
+                    isUnlock = isUnlock,
+                    success = false,
+                    message = "Fastboot execution failed: $result"
+                )
+            }
+        }
+    }
+
+    fun completePhysicalConfirmation() {
+        val currentState = _bootloaderWizardState.value as? BootloaderWizardState.PhysicalConfirmationPrompt ?: return
+        _bootloaderWizardState.value = BootloaderWizardState.Finished(
+            isUnlock = currentState.isUnlock,
+            success = true,
+            message = "Command confirmed successfully."
+        )
+    }
+
     private val _sideloadState = MutableStateFlow<SideloadState>(SideloadState.Idle)
     val sideloadState: StateFlow<SideloadState> = _sideloadState.asStateFlow()
 
