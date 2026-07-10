@@ -9,6 +9,10 @@
     <!-- Shizuku requirement for observing the Shizuku provider -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <!-- Foreground Service permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <queries>
         <package android:name="moe.shizuku.manager" />
     </queries>
@@ -49,6 +53,11 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
         </activity>
+
+        <service
+            android:name=".BackgroundOperationService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
     </application>
 
 </manifest>
