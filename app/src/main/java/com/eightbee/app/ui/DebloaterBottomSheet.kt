@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,12 +29,16 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
+fun DebloaterBottomSheet(
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val debloatList by viewModel.debloatList.collectAsState()
     val degoogleList by viewModel.degoogleList.collectAsState()
     val desamsungList by viewModel.desamsungList.collectAsState()
+    val outputText by viewModel.output.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: General, 1: De-Google, 2: De-Samsung, 3: Snapshot/Restore
     var safetyLevel by remember { mutableStateOf("recommended") }
@@ -59,47 +62,24 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Debloater & App Manager") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { paddingValues ->
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Description card
-            OutlinedCard(
-                modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "System Package Manager",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Uninstall or disable carrier junk, OEM diagnostic overlays, and background tracking services to free up RAM and reduce background power draw. Ensure backup snapshots are created before uninstalling critical packages.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "Debloater & App Manager",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
 
             TabRow(selectedTabIndex = selectedTab) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Bloat") })
@@ -113,10 +93,8 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             when (selectedTab) {
                 0 -> {
                     // General Debloat
-                    Text("General Bloatware Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
-                    Text("Disable generic carrier junk, marketing frameworks, and analytics agents.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
+                    Text("Select safety level for scanning:", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Start))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -159,10 +137,8 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 }
                 1 -> {
                     // De-Google
-                    Text("De-Google Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
-                    Text("Tiers specify exposure levels. Tier 1 disables basic telemetry, Tier 2 blocks non-essential apps, Tier 3 removes GMS components.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    Text("Select Google Tier:", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Start))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -205,10 +181,8 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 }
                 2 -> {
                     // De-Samsung
-                    Text("De-Samsung Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
-                    Text("Tier 1 disables Bixby & AR capabilities, Tier 2 blocks Samsung Health/billing services, Tier 3 cleans One UI system tools.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    Text("Select Samsung Tier:", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Start))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -251,88 +225,52 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 }
                 3 -> {
                     // Snapshot and Restore
-                    Text("Backup & Restore Utilities", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
-                    Text("Export snapshots of your current package list, upload backups to compare state, or scan for currently disabled applications.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Snapshot Tools:", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Start))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    Column(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Card 1: Create Snapshot
-                        OutlinedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        Button(
+                            onClick = { createSnapshot(context, viewModel, coroutineScope) },
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text("Create Backup Snapshot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Export all currently installed package names to a local configuration file for easy restoration later.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = { createSnapshot(context, viewModel, coroutineScope) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Filled.Add, contentDescription = "Create Snapshot")
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Create Snapshot")
-                                }
-                            }
+                            Icon(Icons.Filled.Add, contentDescription = "Backup")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Create")
                         }
-
-                        // Card 2: Restore from Backup
-                        OutlinedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        FilledTonalButton(
+                            onClick = { filePicker.launch("application/json") },
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text("Restore Backup Snapshot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Upload a previously saved JSON snapshot. Compares system packages and reinstalls any missing applications.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                FilledTonalButton(
-                                    onClick = { filePicker.launch("application/json") },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Upload Snapshot")
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Upload Backup")
-                                }
-                            }
+                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Upload")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Upload")
                         }
-
-                        // Card 3: Find Disabled System Packages
-                        OutlinedCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text("Find Disabled Packages", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Queries the package manager for services or system apps that are currently disabled. Select and re-enable them.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = {
-                                        checkedPackages.clear()
-                                        val conn = viewModel.activeConnection.value
-                                        if (conn != null) {
-                                            coroutineScope.launch {
-                                                viewModel.executeCommand("pm list packages -d")
-                                                val disabledOut = conn.runShellCommand("pm list packages -d")
-                                                val disabled = disabledOut.split("\n")
-                                                    .map { it.trim() }
-                                                    .filter { it.startsWith("package:") }
-                                                    .map { it.substringAfter("package:") }
-                                                    .filter { it.isNotEmpty() }
-                                                    
-                                                restoreList = disabled.map { PresetPkg(it, it, 1, "Currently disabled package.", "") }
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Filled.Search, contentDescription = "Scan Disabled")
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Scan Disabled Apps")
+                        Button(
+                            onClick = {
+                                checkedPackages.clear()
+                                val conn = viewModel.activeConnection.value
+                                if (conn != null) {
+                                    coroutineScope.launch {
+                                        viewModel.executeCommand("pm list packages -d")
+                                        val disabledOut = conn.runShellCommand("pm list packages -d")
+                                        val disabled = disabledOut.split("\n")
+                                            .map { it.trim() }
+                                            .filter { it.startsWith("package:") }
+                                            .map { it.substringAfter("package:") }
+                                            .filter { it.isNotEmpty() }
+                                            
+                                        restoreList = disabled.map { PresetPkg(it, it, 1, "Currently disabled package.", "") }
+                                    }
                                 }
-                            }
+                            },
+                            modifier = Modifier.weight(1.2f)
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = "Find Disabled")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Disabled")
                         }
                     }
 
@@ -359,6 +297,94 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun PackageList(
+    packages: List<String>,
+    labels: Map<String, String>,
+    descriptions: Map<String, String>,
+    checkedPackages: MutableMap<String, Boolean>,
+    isRestore: Boolean = false,
+    onExecute: (isUninstall: Boolean) -> Unit
+) {
+    var allChecked by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            onClick = {
+                allChecked = !allChecked
+                packages.forEach { checkedPackages[it] = allChecked }
+            }
+        ) {
+            Text(if (allChecked) "Deselect All" else "Select All")
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // List of packages
+    packages.forEach { pkg ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Checkbox(
+                checked = checkedPackages[pkg] ?: false,
+                onCheckedChange = { checkedPackages[pkg] = it }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(labels[pkg] ?: pkg, fontWeight = FontWeight.Bold)
+                Text(pkg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                descriptions[pkg]?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    if (isRestore) {
+        Button(
+            onClick = { onExecute(false) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = "Restore")
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Restore Selected")
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilledTonalButton(
+                onClick = { onExecute(false) },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Disable")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Disable")
+            }
+            Button(
+                onClick = { onExecute(true) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Uninstall")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Uninstall")
             }
         }
     }
