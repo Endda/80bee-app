@@ -139,17 +139,24 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(12.dp))
 
+            // The hostname goes into a shell command, so only plain DNS names are allowed.
+            val hostIsValid = PRIVATE_DNS_HOST_REGEX.matches(customDnsHost.trim())
             Button(
                 onClick = {
-                    if (customDnsHost.isNotEmpty()) {
-                        viewModel.executeCommand("settings put global private_dns_mode hostname; settings put global private_dns_specifier $customDnsHost")
+                    val host = customDnsHost.trim()
+                    if (PRIVATE_DNS_HOST_REGEX.matches(host)) {
+                        viewModel.executeCommand("settings put global private_dns_mode hostname; settings put global private_dns_specifier '$host'")
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = customDnsHost.isNotEmpty()
+                enabled = hostIsValid
             ) {
                 Text("Apply Custom Hostname")
             }
         }
     }
 }
+
+// Dot-separated labels of letters, digits and hyphens, e.g. dns.quad9.net.
+private val PRIVATE_DNS_HOST_REGEX =
+    Regex("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")

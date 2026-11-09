@@ -13,3 +13,11 @@
 
 # Keep AIDL interfaces
 -keep interface * extends android.os.IInterface { *; }
+
+# Strip verbose, debug and info logging from release builds so shell output,
+# package lists and device details don't end up in logcat.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
