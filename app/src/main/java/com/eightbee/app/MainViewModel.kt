@@ -779,6 +779,23 @@ class MainViewModel : ViewModel() {
     private val _sideloadState = MutableStateFlow<SideloadState>(SideloadState.Idle)
     val sideloadState: StateFlow<SideloadState> = _sideloadState.asStateFlow()
 
+    // Archives are untrusted, so cap how much a single sideload can unpack.
+    private val maxSideloadApkEntries = 200
+    private val maxSideloadBytes = 4L * 1024 * 1024 * 1024
+
+    private fun copyBounded(input: java.io.InputStream, output: java.io.OutputStream, budget: Long): Long {
+        val buffer = ByteArray(64 * 1024)
+        var copied = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            copied += read
+            if (copied > budget) throw java.io.IOException("Archive is too large to sideload.")
+            output.write(buffer, 0, read)
+        }
+        return copied
+    }
+
     fun startSideload(context: Context, uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             _sideloadState.value = SideloadState.CopyingAndParsing
@@ -794,14 +811,24 @@ class MainViewModel : ViewModel() {
                     contentResolver.openInputStream(uri)?.use { inputStream ->
                         val zipInputStream = ZipInputStream(inputStream)
                         var entry = zipInputStream.nextEntry
+                        var bytesLeft = maxSideloadBytes
                         while (entry != null) {
                             if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
+                                if (tempFiles.size >= maxSideloadApkEntries) {
+                                    tempFiles.forEach { it.delete() }
+                                    throw java.io.IOException("Archive contains too many APK files.")
+                                }
                                 val baseName = File(entry.name).name
                                 val tempFile = File(context.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
-                                tempFile.outputStream().use { outputStream ->
-                                    zipInputStream.copyTo(outputStream)
-                                }
                                 tempFiles.add(tempFile)
+                                try {
+                                    tempFile.outputStream().use { outputStream ->
+                                        bytesLeft -= copyBounded(zipInputStream, outputStream, bytesLeft)
+                                    }
+                                } catch (e: java.io.IOException) {
+                                    tempFiles.forEach { it.delete() }
+                                    throw e
+                                }
                             }
                             zipInputStream.closeEntry()
                             entry = zipInputStream.nextEntry
@@ -809,7 +836,7 @@ class MainViewModel : ViewModel() {
                         zipInputStream.close()
                     }
                 } else {
-                    val tempFile = File(context.cacheDir, "sideload_${System.currentTimeMillis()}_$fileName")
+                    val tempFile = File(context.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
                     contentResolver.openInputStream(uri)?.use { inputStream ->
                         tempFile.outputStream().use { outputStream ->
                             inputStream.copyTo(outputStream)
