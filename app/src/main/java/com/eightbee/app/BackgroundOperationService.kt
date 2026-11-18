@@ -3,12 +3,14 @@ package com.eightbee.app
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.eightbee.app.connection.ConnectionManager
 import kotlinx.coroutines.*
@@ -25,6 +27,7 @@ class BackgroundOperationService : Service() {
 
         private const val NOTIFICATION_ID = 8888
         private const val CHANNEL_ID = "background_ops_channel"
+        private const val BATTERY_MONITOR_MAX_DURATION_MS = 30 * 60 * 1000L
 
         var connectionManager: ConnectionManager? = null
 
@@ -60,8 +63,35 @@ class BackgroundOperationService : Service() {
             ACTION_STOP_BATTERY_MONITOR -> stopBatteryMonitor()
         }
 
-        updateNotification()
+        if (_isCompiling.value || _isMonitoringBattery.value) {
+            updateNotification()
+        } else {
+            checkStopSelf()
+        }
         return START_NOT_STICKY
+    }
+
+    override fun onTimeout(startId: Int) {
+        handleServiceTimeout(startId)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleServiceTimeout(startId)
+    }
+
+    private fun handleServiceTimeout(startId: Int) {
+        compileJob?.cancel()
+        batteryJob?.cancel()
+        if (_isCompiling.value) {
+            _isCompiling.value = false
+            _compileProgress.value = "Compilation stopped: foreground service time limit reached."
+        }
+        if (_isMonitoringBattery.value) {
+            _isMonitoringBattery.value = false
+            _batteryTelemetry.value = "Battery monitor stopped: foreground service time limit reached."
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
     }
 
     private fun startCompile() {
@@ -74,7 +104,7 @@ class BackgroundOperationService : Service() {
             if (conn == null || !conn.isAvailable()) {
                 _compileProgress.value = "Error: Connection not active."
                 _isCompiling.value = false
-                updateNotification()
+                refreshOrStopSelf()
                 return@launch
             }
 
@@ -92,8 +122,6 @@ class BackgroundOperationService : Service() {
                 val total = packages.size
                 if (total == 0) {
                     _compileProgress.value = "No packages found."
-                    _isCompiling.value = false
-                    updateNotification()
                     return@launch
                 }
 
@@ -109,8 +137,7 @@ class BackgroundOperationService : Service() {
                 _compileProgress.value = "Compilation error: ${e.message}"
             } finally {
                 _isCompiling.value = false
-                updateNotification()
-                checkStopSelf()
+                refreshOrStopSelf()
             }
         }
     }
@@ -119,8 +146,7 @@ class BackgroundOperationService : Service() {
         compileJob?.cancel()
         _isCompiling.value = false
         _compileProgress.value = "Compilation cancelled."
-        updateNotification()
-        checkStopSelf()
+        refreshOrStopSelf()
     }
 
     private fun startBatteryMonitor() {
@@ -133,12 +159,17 @@ class BackgroundOperationService : Service() {
             if (conn == null || !conn.isAvailable()) {
                 _batteryTelemetry.value = "Error: Connection not active."
                 _isMonitoringBattery.value = false
-                updateNotification()
+                refreshOrStopSelf()
                 return@launch
             }
 
+            val startElapsedMs = SystemClock.elapsedRealtime()
             try {
                 while (isActive) {
+                    if (SystemClock.elapsedRealtime() - startElapsedMs >= BATTERY_MONITOR_MAX_DURATION_MS) {
+                        _batteryTelemetry.value = "Battery monitor stopped after 30-minute session limit."
+                        break
+                    }
                     val rawOutput = conn.runShellCommand("dumpsys battery")
                     _batteryTelemetry.value = rawOutput
                     updateNotification()
@@ -148,8 +179,7 @@ class BackgroundOperationService : Service() {
                 _batteryTelemetry.value = "Error: ${e.message}"
             } finally {
                 _isMonitoringBattery.value = false
-                updateNotification()
-                checkStopSelf()
+                refreshOrStopSelf()
             }
         }
     }
@@ -158,8 +188,15 @@ class BackgroundOperationService : Service() {
         batteryJob?.cancel()
         _isMonitoringBattery.value = false
         _batteryTelemetry.value = "Battery monitor stopped."
-        updateNotification()
-        checkStopSelf()
+        refreshOrStopSelf()
+    }
+
+    private fun refreshOrStopSelf() {
+        if (_isCompiling.value || _isMonitoringBattery.value) {
+            updateNotification()
+        } else {
+            checkStopSelf()
+        }
     }
 
     private fun checkStopSelf() {
@@ -181,19 +218,47 @@ class BackgroundOperationService : Service() {
             text = "Monitoring battery status..."
         }
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .build()
+
+        if (_isCompiling.value) {
+            builder.addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Stop Compile",
+                createStopPendingIntent(ACTION_STOP_COMPILE, 1)
+            )
+        }
+        if (_isMonitoringBattery.value) {
+            builder.addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Stop Monitor",
+                createStopPendingIntent(ACTION_STOP_BATTERY_MONITOR, 2)
+            )
+        }
+
+        val notification = builder.build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+    }
+
+    private fun createStopPendingIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, BackgroundOperationService::class.java).apply {
+            this.action = action
+        }
+        return PendingIntent.getService(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
     }
 
     private fun createNotificationChannel() {

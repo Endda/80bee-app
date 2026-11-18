@@ -1,27 +1,35 @@
 package com.eightbee.app
 
+import android.app.Application
+import android.content.Context
+import android.content.Intent
+import android.hardware.usb.UsbManager
+import android.net.Uri
+import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.eightbee.app.connection.ConnectionManager
+import com.eightbee.app.connection.ConnectionState
+import com.eightbee.app.connection.OtgConnectionManager
 import com.eightbee.app.connection.ShizukuConnectionManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.InputStream
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
 import java.util.zip.ZipInputStream
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import androidx.core.graphics.drawable.toBitmap
 
 data class DeviceSettings(
     val privateDnsMode: String = "unknown",
@@ -32,14 +40,34 @@ data class DeviceSettings(
     val adaptiveBatteryEnabled: Boolean = true
 )
 
-class MainViewModel : ViewModel() {
+data class BatteryOptimizerState(
+    val maxHibernation: Boolean = false,
+    val dozeZero: Boolean = false,
+    val backgroundDrainMonitor: Boolean = false,
+    val lockRefreshRate60: Boolean = false,
+    val disableWindowBlurs: Boolean = false,
+    val superDim: Boolean = false,
+    val samsungCpuBoosterOff: Boolean = false,
+    val samsungRamPlusOff: Boolean = false,
+    val samsungMotionEngineOff: Boolean = false
+)
 
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    val shizukuManager = ShizukuConnectionManager()
+    val otgManager = OtgConnectionManager(
+        application.applicationContext,
+        application.getSystemService(Context.USB_SERVICE) as UsbManager
+    )
 
     private val _activeConnection = MutableStateFlow<ConnectionManager?>(null)
     val activeConnection: StateFlow<ConnectionManager?> = _activeConnection.asStateFlow()
 
     private val _settings = MutableStateFlow(DeviceSettings())
     val settings: StateFlow<DeviceSettings> = _settings.asStateFlow()
+
+    private val _batteryOptimizerState = MutableStateFlow(BatteryOptimizerState())
+    val batteryOptimizerState: StateFlow<BatteryOptimizerState> = _batteryOptimizerState.asStateFlow()
 
     private val _output = MutableStateFlow("Ready.")
     val output: StateFlow<String> = _output.asStateFlow()
@@ -61,6 +89,59 @@ class MainViewModel : ViewModel() {
     private val _currentScreen = MutableStateFlow(Screen.Dashboard)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
     private val navStack = mutableListOf(Screen.Dashboard)
+
+    // Pixel Magisk Patcher States
+    private val _patcherState = MutableStateFlow(PixelMagiskPatcherState())
+    val patcherState: StateFlow<PixelMagiskPatcherState> = _patcherState.asStateFlow()
+
+    private val _patcherExtractLogs = MutableStateFlow<List<LogEntry>>(emptyList())
+    val patcherExtractLogs: StateFlow<List<LogEntry>> = _patcherExtractLogs.asStateFlow()
+
+    private val _patcherPatchLogs = MutableStateFlow<List<LogEntry>>(emptyList())
+    val patcherPatchLogs: StateFlow<List<LogEntry>> = _patcherPatchLogs.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            activeConnection.collectLatest { conn ->
+                if (conn is OtgConnectionManager) {
+                    conn.connectionState.collect { state ->
+                        var shouldStartRecon = false
+                        _patcherState.update { currentPatcherState ->
+                            if (!currentPatcherState.isActive) {
+                                currentPatcherState
+                            } else {
+                                when (state) {
+                                    ConnectionState.FastbootConnected -> currentPatcherState.copy(
+                                        isFastbootConnected = true,
+                                        fastbootStatus = "STATUS: FASTBOOT_CONNECTED",
+                                        flashStep = 3
+                                    )
+                                    ConnectionState.AdbConnected -> {
+                                        if (currentPatcherState.currentStep == 1) {
+                                            shouldStartRecon = true
+                                        }
+                                        currentPatcherState.copy(isFastbootConnected = false)
+                                    }
+                                    else -> currentPatcherState.copy(isFastbootConnected = false)
+                                }
+                            }
+                        }
+                        if (shouldStartRecon) {
+                            startMagiskRecon()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        otgManager.disconnect()
+        if (BackgroundOperationService.connectionManager === otgManager) {
+            BackgroundOperationService.connectionManager = null
+        }
+    }
 
     fun navigateTo(screen: Screen) {
         navStack.add(screen)
@@ -147,8 +228,8 @@ class MainViewModel : ViewModel() {
             _isExecuting.value = true
             _output.value = "Scanning for bloatware..."
             try {
-                val rawManufacturer = conn.runShellCommand("getprop ro.product.manufacturer")
-                val manufacturer = rawManufacturer.trim().lowercase()
+                val manufacturer = conn.runShellCommand("getprop ro.product.manufacturer").trim()
+                val brand = conn.runShellCommand("getprop ro.product.brand").trim()
 
                 val listOutput = conn.runShellCommand("pm list packages")
                 val installed = listOutput.split("\n")
@@ -159,19 +240,12 @@ class MainViewModel : ViewModel() {
                     .toSet()
 
                 val db = PackageDatabase.loadUltimateDb(context)
-
-                val allowedLevels = mutableSetOf("recommended")
-                if (safetyLevel == "advanced" || safetyLevel == "unsafe") {
-                    allowedLevels.add("advanced")
-                }
-                if (safetyLevel == "unsafe") {
-                    allowedLevels.add("unsafe")
-                }
+                val allowedLevels = PackageDatabase.allowedSafetyLevels(safetyLevel)
 
                 val filtered = db.values.filter { bloat ->
                     installed.contains(bloat.packageName) &&
                     allowedLevels.contains(bloat.safety.lowercase()) &&
-                    (bloat.oems.isEmpty() || bloat.oems.any { it.lowercase() == manufacturer })
+                    PackageDatabase.matchesOem(bloat.oems, manufacturer, brand)
                 }.sortedBy { it.label }
 
                 _debloatList.value = filtered
@@ -248,13 +322,18 @@ class MainViewModel : ViewModel() {
             var success = 0
             var fail = 0
             for (pkg in packages) {
+                if (!PackageDatabase.isValidPackageName(pkg)) {
+                    fail++
+                    _output.value = "Skipped invalid package name: $pkg"
+                    continue
+                }
                 val cmd = if (isUninstall) {
                     "pm uninstall -k --user 0 $pkg"
                 } else {
                     "pm disable-user --user 0 $pkg"
                 }
                 val out = conn.runShellCommand(cmd)
-                if (out.toLowerCase().contains("success") || out.toLowerCase().contains("new state: disabled-user")) {
+                if (out.lowercase().contains("success") || out.lowercase().contains("new state: disabled-user")) {
                     success++
                 } else {
                     fail++
@@ -274,12 +353,17 @@ class MainViewModel : ViewModel() {
             var success = 0
             var fail = 0
             for (pkg in packages) {
+                if (!PackageDatabase.isValidPackageName(pkg)) {
+                    fail++
+                    _output.value = "Skipped invalid package name: $pkg"
+                    continue
+                }
                 var out = conn.runShellCommand("pm enable $pkg")
-                if (out.toLowerCase().contains("new state: enabled") || out.toLowerCase().contains("success")) {
+                if (out.lowercase().contains("new state: enabled") || out.lowercase().contains("success")) {
                     success++
                 } else {
                     out = conn.runShellCommand("cmd package install-existing --user 0 $pkg")
-                    if (out.toLowerCase().contains("installed") || out.toLowerCase().contains("success")) {
+                    if (out.lowercase().contains("installed") || out.lowercase().contains("success")) {
                         success++
                     } else {
                         fail++
@@ -318,28 +402,32 @@ class MainViewModel : ViewModel() {
                 "motorola" -> list.addAll(listOf("com.motorola.bluetooth", "com.motorola.bt"))
             }
 
-            val isShizuku = conn is ShizukuConnectionManager
             for (pkg in list) {
-                if (isShizuku) {
-                    _output.value = "[Shizuku Guard] Skipping clear for $pkg (pm clear requires ADB/OTG)"
-                } else {
-                    _output.value = "Clearing data for $pkg..."
-                    conn.runShellCommand("pm clear $pkg")
-                }
+                _output.value = "Clearing data for $pkg..."
+                conn.runShellCommand("pm clear $pkg")
             }
 
             if (isAdvanced) {
-                _output.value = "Cycling radios via Airplane Mode..."
-                val apStateStr = conn.runShellCommand("settings get global airplane_mode_on").trim()
-                val originalApState = apStateStr.toIntOrNull() ?: 0
+                val sdkInt = conn.runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
+                if (sdkInt >= Build.VERSION_CODES.R) {
+                    _output.value = "Cycling radios via Airplane Mode..."
+                    val apStateStr = conn.runShellCommand("settings get global airplane_mode_on").trim()
+                    val originalApState = apStateStr.toIntOrNull() ?: 0
 
-                conn.runShellCommand("settings put global airplane_mode_on 1")
-                conn.runShellCommand("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
-                delay(4000)
-
-                conn.runShellCommand("settings put global airplane_mode_on $originalApState")
-                conn.runShellCommand("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state ${originalApState == 1}")
-                delay(4000)
+                    if (originalApState == 1) {
+                        conn.runShellCommand("cmd connectivity airplane-mode disable")
+                        delay(4000)
+                        conn.runShellCommand("cmd connectivity airplane-mode enable")
+                        delay(4000)
+                    } else {
+                        conn.runShellCommand("cmd connectivity airplane-mode enable")
+                        delay(4000)
+                        conn.runShellCommand("cmd connectivity airplane-mode disable")
+                        delay(4000)
+                    }
+                } else {
+                    _output.value = "Skipping Airplane Mode radio cycle (cmd connectivity requires Android 11+; target SDK is $sdkInt)."
+                }
             }
 
             _output.value = "Enabling Bluetooth..."
@@ -362,26 +450,23 @@ class MainViewModel : ViewModel() {
                 conn.runShellCommand("dumpsys deviceidle disable")
                 _output.value = "Xiaomi Quirk Applied: Doze disabled. Will reset on reboot."
             } else if (oem == "oneplus") {
-                if (conn is ShizukuConnectionManager) {
-                    _output.value = "[Shizuku Guard] Clearing battery management apps requires ADB/OTG."
-                } else {
-                    _output.value = "Clearing battery app data..."
-                    conn.runShellCommand("pm clear com.oplus.battery")
-                    conn.runShellCommand("pm clear com.coloros.battery")
-                    _output.value = "OnePlus Quirk Applied: Battery app cleared."
-                }
+                _output.value = "Clearing battery app data..."
+                conn.runShellCommand("pm clear com.oplus.battery")
+                conn.runShellCommand("pm clear com.coloros.battery")
+                _output.value = "OnePlus Quirk Applied: Battery app cleared."
             }
             _isExecuting.value = false
         }
     }
 
     // Audio Mods
-    fun executeAudioBypass(apiLevel: Int) {
+    fun executeAudioBypass() {
         val conn = _activeConnection.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
             _isExecuting.value = true
             _output.value = "Applying Audio Safety Bypass..."
-            if (apiLevel >= 34) {
+            val targetApiLevel = conn.runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
+            if (targetApiLevel >= 34) {
                 conn.runShellCommand("settings put global audio_safe_csd_next_warning 999999.0")
                 conn.runShellCommand("settings put global safe_media_volume_enabled 0")
                 conn.runShellCommand("settings put global audio_safe_volume_state 3")
@@ -408,8 +493,40 @@ class MainViewModel : ViewModel() {
     }
 
     // Battery Optimizer Extra Toggles
+    fun refreshBatteryOptimizerState() {
+        val conn = _activeConnection.value ?: return
+        if (!conn.isAvailable()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val lightAfterInactive = conn.runShellCommand("device_config get device_idle light_after_inactive_to").trim()
+            val inactiveTo = conn.runShellCommand("device_config get device_idle inactive_to").trim()
+            val lightMaintMin = conn.runShellCommand("device_config get device_idle light_idle_maintenance_min_budget").trim()
+            val deepMaintTime = conn.runShellCommand("device_config get device_idle min_deep_maintenance_time").trim()
+            val bgDrain = conn.runShellCommand("device_config get background_install_control bg_current_drain_monitor_enable").trim()
+            val peakRefresh = conn.runShellCommand("settings get system peak_refresh_rate").trim().toFloatOrNull()
+            val minRefresh = conn.runShellCommand("settings get system min_refresh_rate").trim().toFloatOrNull()
+            val windowBlurs = conn.runShellCommand("settings get global disable_window_blurs").trim()
+            val colorMatrix = conn.runShellCommand("settings get secure accessibility_display_color_matrix").trim()
+            val samsungCpu = conn.runShellCommand("settings get global sem_enhanced_cpu_responsiveness").trim()
+            val samsungRamPlus = conn.runShellCommand("settings get global ram_expand_size_list").trim()
+            val samsungMotion = conn.runShellCommand("settings get system motion_engine").trim()
+
+            _batteryOptimizerState.value = BatteryOptimizerState(
+                maxHibernation = lightAfterInactive == "0" && inactiveTo == "0",
+                dozeZero = lightMaintMin == "0" && deepMaintTime == "0",
+                backgroundDrainMonitor = bgDrain.equals("true", ignoreCase = true),
+                lockRefreshRate60 = peakRefresh == 60.0f && minRefresh == 60.0f,
+                disableWindowBlurs = windowBlurs == "1",
+                superDim = colorMatrix == "0.5,0,0,0,0,0,0.5,0,0,0,0,0,0.5,0,0,0,0,0,1,0",
+                samsungCpuBoosterOff = samsungCpu == "0",
+                samsungRamPlusOff = samsungRamPlus == "0",
+                samsungMotionEngineOff = samsungMotion == "0"
+            )
+        }
+    }
+
     fun applyMaxHibernation() {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(maxHibernation = true) }
         viewModelScope.launch(Dispatchers.IO) {
             _isExecuting.value = true
             _output.value = "Applying Maximum Hibernation Doze Mode..."
@@ -426,6 +543,7 @@ class MainViewModel : ViewModel() {
 
     fun restoreMaxHibernation() {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(maxHibernation = false) }
         viewModelScope.launch(Dispatchers.IO) {
             _isExecuting.value = true
             _output.value = "Restoring Hibernation defaults..."
@@ -442,6 +560,7 @@ class MainViewModel : ViewModel() {
 
     fun applyDozeZero() {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(dozeZero = true) }
         viewModelScope.launch(Dispatchers.IO) {
             _isExecuting.value = true
             _output.value = "Applying Zero Maintenance Standby..."
@@ -456,6 +575,7 @@ class MainViewModel : ViewModel() {
 
     fun restoreDozeZero() {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(dozeZero = false) }
         viewModelScope.launch(Dispatchers.IO) {
             _isExecuting.value = true
             _output.value = "Restoring Zero Maintenance defaults..."
@@ -470,6 +590,7 @@ class MainViewModel : ViewModel() {
 
     fun setBackgroundDrainMonitor(enabled: Boolean) {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(backgroundDrainMonitor = enabled) }
         viewModelScope.launch(Dispatchers.IO) {
             if (enabled) {
                 conn.runShellCommand("device_config put background_install_control bg_current_drain_monitor_enable true")
@@ -483,6 +604,7 @@ class MainViewModel : ViewModel() {
 
     fun setLockRefreshRate60(enabled: Boolean) {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(lockRefreshRate60 = enabled) }
         viewModelScope.launch(Dispatchers.IO) {
             if (enabled) {
                 conn.runShellCommand("settings put system peak_refresh_rate 60.0")
@@ -498,6 +620,7 @@ class MainViewModel : ViewModel() {
 
     fun setDisableWindowBlurs(enabled: Boolean) {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(disableWindowBlurs = enabled) }
         viewModelScope.launch(Dispatchers.IO) {
             val valStr = if (enabled) "1" else "0"
             conn.runShellCommand("settings put global disable_window_blurs $valStr")
@@ -507,6 +630,7 @@ class MainViewModel : ViewModel() {
 
     fun setSamsungCpuResponsiveness(enabled: Boolean) {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(samsungCpuBoosterOff = !enabled) }
         viewModelScope.launch(Dispatchers.IO) {
             val valStr = if (enabled) "1" else "0"
             conn.runShellCommand("settings put global sem_enhanced_cpu_responsiveness $valStr")
@@ -516,6 +640,7 @@ class MainViewModel : ViewModel() {
 
     fun setSamsungRamPlusOff(disabled: Boolean) {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(samsungRamPlusOff = disabled) }
         viewModelScope.launch(Dispatchers.IO) {
             if (disabled) {
                 conn.runShellCommand("settings put global ram_expand_size_list 0")
@@ -529,6 +654,7 @@ class MainViewModel : ViewModel() {
 
     fun setSamsungMotionEngineOff(disabled: Boolean) {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(samsungMotionEngineOff = disabled) }
         viewModelScope.launch(Dispatchers.IO) {
             if (disabled) {
                 conn.runShellCommand("settings put system motion_engine 0")
@@ -542,6 +668,7 @@ class MainViewModel : ViewModel() {
 
     fun applySuperDim() {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(superDim = true) }
         viewModelScope.launch(Dispatchers.IO) {
             conn.runShellCommand("settings put secure accessibility_display_color_matrix 0.5,0,0,0,0,0,0.5,0,0,0,0,0,0.5,0,0,0,0,0,1,0")
             _output.value = "Super Dim color matrix applied."
@@ -550,6 +677,7 @@ class MainViewModel : ViewModel() {
 
     fun restoreSuperDim() {
         val conn = _activeConnection.value ?: return
+        _batteryOptimizerState.update { it.copy(superDim = false) }
         viewModelScope.launch(Dispatchers.IO) {
             conn.runShellCommand("settings delete secure accessibility_display_color_matrix")
             _output.value = "Super Dim color matrix restored."
@@ -613,51 +741,78 @@ class MainViewModel : ViewModel() {
         val conn = _activeConnection.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
             _isExecuting.value = true
-            _output.value = "Deploying Home Assistant..."
+            try {
+                _output.value = "Checking Termux installation..."
+                val termuxPath = conn.runShellCommand("pm path com.termux").trim()
+                if (!termuxPath.startsWith("package:")) {
+                    _output.value = "Error: Termux (com.termux) is not installed on the target device."
+                    return@launch
+                }
 
-            val isShizuku = conn is ShizukuConnectionManager
-            if (isShizuku) {
-                _output.value = "[Shizuku Guard] Scoped storage may restrict writing directly to Termux files. Proceeding..."
+                val isShizuku = conn is ShizukuConnectionManager
+                _output.value = "Generating installation script..."
+                // Configure ~/.termux/termux.properties inside Termux itself because shell UID 2000
+                // cannot write to /data/data/com.termux under Android's app sandbox.
+                val setupScript = """
+                    #!/data/data/com.termux/files/usr/bin/bash
+                    echo "=== Configuring Termux permissions ==="
+                    mkdir -p "${'$'}HOME/.termux"
+                    chmod 700 "${'$'}HOME/.termux"
+                    PROPERTIES_FILE="${'$'}HOME/.termux/termux.properties"
+                    if grep -q "allow-external-apps" "${'$'}PROPERTIES_FILE" 2>/dev/null; then
+                        sed -i 's/^#* *allow-external-apps *=.*/allow-external-apps=true/' "${'$'}PROPERTIES_FILE"
+                    else
+                        echo "allow-external-apps=true" >> "${'$'}PROPERTIES_FILE"
+                    fi
+                    echo "=== Starting Home Assistant Core installation ==="
+                    pkg update -y && pkg upgrade -y
+                    pkg install python rust libjpeg-turbo libffi binutils openssl -y
+                    pip install --upgrade pip
+                    pip install homeassistant
+                    echo "=== Home Assistant Core installation finished ==="
+                    echo "Run 'hass' command to start server."
+                """.trimIndent()
+
+                val tempFile = File(context.cacheDir, "setup_ha.sh")
+                try {
+                    tempFile.writeText(setupScript)
+                    if (conn is OtgConnectionManager) {
+                        conn.pushFile(tempFile.inputStream(), tempFile.length(), "/sdcard/Download/setup_ha.sh")
+                    } else {
+                        tempFile.inputStream().use { inputStream ->
+                            conn.runShellCommandWithInput("cat > /sdcard/Download/setup_ha.sh", inputStream)
+                        }
+                    }
+                } finally {
+                    tempFile.delete()
+                }
+
+                val verifyOut = conn.runShellCommand("test -s /sdcard/Download/setup_ha.sh && echo OK").trim()
+                if (verifyOut != "OK") {
+                    _output.value = "Error: Failed to stage /sdcard/Download/setup_ha.sh on target device."
+                    return@launch
+                }
+
+                _output.value = "Installation script staged at /sdcard/Download/setup_ha.sh"
+
+                _output.value = "Launching Termux and running installer..."
+                conn.runShellCommand("am start -n com.termux/com.termux.app.TermuxActivity")
+                delay(2000)
+
+                if (isShizuku) {
+                    _output.value = "[Shizuku Guard] Keystroke injection may fail depending on OEM security settings. If it fails, open Termux and run: bash /sdcard/Download/setup_ha.sh"
+                }
+                conn.runShellCommand("input text bash")
+                conn.runShellCommand("input keyevent 62")
+                conn.runShellCommand("input text /sdcard/Download/setup_ha.sh")
+                conn.runShellCommand("input keyevent 66")
+
+                _output.value = "Deployment commands sent! Check Termux on your device."
+            } catch (e: Exception) {
+                _output.value = "Home Assistant deploy failed: ${e.message}"
+            } finally {
+                _isExecuting.value = false
             }
-            conn.runShellCommand("mkdir -p /data/data/com.termux/files/home/.termux")
-            conn.runShellCommand("chmod 700 /data/data/com.termux/files/home/.termux")
-            val propertiesFile = "/data/data/com.termux/files/home/.termux/termux.properties"
-            conn.runShellCommand("grep -q \"allow-external-apps\" $propertiesFile 2>/dev/null && sed -i 's/^#* *allow-external-apps *=.*/allow-external-apps=true/' $propertiesFile || echo \"allow-external-apps=true\" >> $propertiesFile")
-
-            _output.value = "Generating installation script..."
-            val setupScript = """
-                #!/data/data/com.termux/files/usr/bin/bash
-                echo "=== Starting Home Assistant Core installation ==="
-                pkg update -y && pkg upgrade -y
-                pkg install python rust libjpeg-turbo libffi binutils openssl -y
-                pip install --upgrade pip
-                pip install homeassistant
-                echo "=== Home Assistant Core installation finished ==="
-                echo "Run 'hass' command to start server."
-            """.trimIndent()
-
-            val tempFile = File(context.cacheDir, "setup_ha.sh")
-            tempFile.writeText(setupScript)
-            val inputStream = tempFile.inputStream()
-            conn.runShellCommandWithInput("cat > /sdcard/Download/setup_ha.sh", inputStream)
-            tempFile.delete()
-
-            _output.value = "Installation script staged at /sdcard/Download/setup_ha.sh"
-
-            _output.value = "Launching Termux and running installer..."
-            conn.runShellCommand("am start -n com.termux/com.termux.app.TermuxActivity")
-            delay(2000)
-
-            if (isShizuku) {
-                _output.value = "[Shizuku Guard] Keystroke injection may fail depending on OEM security settings. If it fails, open Termux and run: bash /sdcard/Download/setup_ha.sh"
-            }
-            conn.runShellCommand("input text bash")
-            conn.runShellCommand("input keyevent 62")
-            conn.runShellCommand("input text /sdcard/Download/setup_ha.sh")
-            conn.runShellCommand("input keyevent 66")
-
-            _output.value = "Deployment commands sent! Check Termux on your device."
-            _isExecuting.value = false
         }
     }
 
@@ -807,6 +962,7 @@ class MainViewModel : ViewModel() {
                                 fileName.endsWith(".xapk", true)
                 
                 val tempFiles = mutableListOf<File>()
+                var explicitBaseApk: File? = null
                 if (isArchive) {
                     contentResolver.openInputStream(uri)?.use { inputStream ->
                         val zipInputStream = ZipInputStream(inputStream)
@@ -821,6 +977,9 @@ class MainViewModel : ViewModel() {
                                 val baseName = File(entry.name).name
                                 val tempFile = File(context.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
                                 tempFiles.add(tempFile)
+                                if (baseName.equals("base.apk", ignoreCase = true) && explicitBaseApk == null) {
+                                    explicitBaseApk = tempFile
+                                }
                                 try {
                                     tempFile.outputStream().use { outputStream ->
                                         bytesLeft -= copyBounded(zipInputStream, outputStream, bytesLeft)
@@ -850,8 +1009,8 @@ class MainViewModel : ViewModel() {
                     return@launch
                 }
 
-                val baseApk = tempFiles.find { it.name.equals("base.apk", ignoreCase = true) } 
-                    ?: tempFiles.maxByOrNull { it.length() } 
+                val baseApk = explicitBaseApk
+                    ?: tempFiles.maxByOrNull { it.length() }
                     ?: tempFiles.first()
                 
                 val packageManager = context.packageManager
@@ -974,10 +1133,11 @@ class MainViewModel : ViewModel() {
                     _sideloadState.value = SideloadState.Installing(InstallStep.STREAM_APKS, completedSteps, progressText)
                     
                     FileInputStream(file).use { fis ->
-                        val writeCommand = "cmd package install-write -S ${file.length()} $sessionId ${file.name} -"
+                        val remoteSplitName = "split_$index.apk"
+                        val writeCommand = "cmd package install-write -S ${file.length()} $sessionId $remoteSplitName -"
                         val writeResult = connection.runShellCommandWithInput(writeCommand, fis)
                         
-                        if (writeResult.contains("Failure", ignoreCase = true)) {
+                        if (!writeResult.contains("Success", ignoreCase = true) || writeResult.contains("Failure", ignoreCase = true)) {
                             connection.runShellCommand("cmd package install-abandon $sessionId")
                             throw Exception("Failed to write ${file.name}: $writeResult")
                         }
@@ -1037,5 +1197,523 @@ class MainViewModel : ViewModel() {
         }
         return result ?: "unknown"
     }
+
+    // --- Pixel Magisk Patcher Methods ---
+    fun startPatcher() {
+        _patcherState.value = PixelMagiskPatcherState(isActive = true, currentStep = 1)
+        _patcherExtractLogs.value = emptyList()
+        _patcherPatchLogs.value = emptyList()
+        val connection = _activeConnection.value
+        if (connection is OtgConnectionManager && connection.isAvailable() && !connection.isFastboot()) {
+            startMagiskRecon()
+        }
+    }
+
+    fun clearPatcherState() {
+        val state = _patcherState.value
+        state.bootFile?.delete()
+        state.magiskApkFile?.delete()
+        state.patchedFile?.delete()
+        _patcherState.value = PixelMagiskPatcherState(isActive = false)
+        _patcherExtractLogs.value = emptyList()
+        _patcherPatchLogs.value = emptyList()
+    }
+
+    fun goToPatcherStep(step: Int) {
+        if (step in 1..6) {
+            _patcherState.update { it.copy(currentStep = step) }
+            // Auto trigger Phase 4 setup
+            if (step == 4) {
+                _patcherPatchLogs.value = emptyList()
+                _patcherState.update { it.copy(patchLogs = emptyList()) }
+                addPatcherPatchLog("Awaiting execution trigger...", "INFO")
+            }
+        }
+    }
+
+    fun startMagiskRecon() {
+        val connection = _activeConnection.value as? OtgConnectionManager ?: return
+        var started = false
+        _patcherState.update { state ->
+            if (state.isReconning) {
+                state
+            } else {
+                started = true
+                state.copy(isReconning = true, integrityStatus = "GATHERING_DATA")
+            }
+        }
+        if (!started) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (!connection.isAvailable()) {
+                    throw Exception("ADB Connection is still initializing or unauthorized. Please ensure target device is unlocked and authorize the USB debugging prompt on the target device screen.")
+                }
+                
+                val codename = connection.runShellCommand("getprop ro.product.device").trim()
+                if (codename.startsWith("Error", ignoreCase = true)) {
+                    throw Exception(codename)
+                }
+                val buildId = connection.runShellCommand("getprop ro.build.display.id").trim()
+                val apiLevelStr = connection.runShellCommand("getprop ro.product.first_api_level").trim()
+                val apiLevel = apiLevelStr.toIntOrNull() ?: 30
+                val previewSdkStr = connection.runShellCommand("getprop ro.build.version.preview_sdk").trim()
+                val previewSdk = previewSdkStr.toIntOrNull() ?: 0
+                val buildCodename = connection.runShellCommand("getprop ro.build.version.codename").trim()
+                val abi = connection.runShellCommand("getprop ro.product.cpu.abi").trim()
+                val oemAllowedStr = connection.runShellCommand("getprop sys.oem_unlock_allowed").trim()
+                val oemAllowed = oemAllowedStr == "1"
+                val currentSlot = connection.runShellCommand("getprop ro.boot.slot_suffix").trim()
+                
+                val flashLocked = connection.runShellCommand("getprop ro.boot.flash.locked").trim()
+                val vbState = connection.runShellCommand("getprop ro.boot.verifiedbootstate").trim()
+                val isUnlocked = flashLocked == "0" || vbState == "orange"
+                
+                val isBeta = previewSdk > 0 || buildCodename != "REL" || buildId.contains("beta", ignoreCase = true) || buildId.contains("preview", ignoreCase = true)
+                
+                if (!abi.contains("arm64-v8a")) {
+                    throw Exception("Unsupported Architecture: $abi. This tool requires ARM64.")
+                }
+                
+                val pixel6Series = listOf("oriole", "raven", "bluejay")
+                val isPixel6 = pixel6Series.contains(codename.lowercase())
+                val targetPartition = if (!isPixel6 && apiLevel >= 33) "init_boot" else "boot"
+                
+                val deviceData = MagiskDeviceData(
+                    codename = codename,
+                    buildId = buildId,
+                    apiLevel = apiLevel,
+                    previewSdk = previewSdk,
+                    isBeta = isBeta,
+                    abi = abi,
+                    oemAllowed = oemAllowed,
+                    currentSlot = currentSlot,
+                    isUnlocked = isUnlocked,
+                    targetPartition = targetPartition
+                )
+                
+                _patcherState.update {
+                    it.copy(
+                        isReconning = false,
+                        deviceData = deviceData,
+                        showUnlockWarning = !isUnlocked,
+                        integrityStatus = "READY_FOR_IMAGE"
+                    )
+                }
+            } catch (e: Exception) {
+                _patcherState.update {
+                    it.copy(
+                        isReconning = false,
+                        integrityStatus = "RECON_FAILED: ${e.message}"
+                    )
+                }
+                addPatcherPatchLog("Recon failed: ${e.message}", "ERROR")
+            }
+        }
+    }
+
+    fun handleMagiskBootFileSelected(context: Context, uri: Uri) {
+        _patcherState.update {
+            it.copy(
+                integrityStatus = "PROCESSING",
+                integrityProgress = 0.05f,
+                imageWarning = null,
+                imageError = null
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            var copiedRawFile: File? = null
+            try {
+                val fileName = getFileName(context, uri)
+                val deviceData = _patcherState.value.deviceData
+                val totalBytes = getUriSize(context, uri)
+
+                val isZip = fileName.endsWith(".zip", ignoreCase = true) || run {
+                    val probe = ByteArray(4)
+                    val read = context.contentResolver.openInputStream(uri)?.use { it.read(probe) } ?: 0
+                    MagiskPatcherHelper.isZipMagic(probe, read)
+                }
+
+                val extractionResult: BootExtractionResult = if (isZip) {
+                    _patcherState.update {
+                        it.copy(
+                            integrityStatus = "SCANNING_ARCHIVE",
+                            integrityProgress = 0.1f
+                        )
+                    }
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("Unable to open selected archive.")
+                    inputStream.use { stream ->
+                        MagiskPatcherHelper.extractBootImageFromStream(
+                            inputStream = stream,
+                            cacheDir = context.cacheDir,
+                            targetPartition = deviceData?.targetPartition,
+                            expectedCodename = deviceData?.codename,
+                            expectedBuildId = deviceData?.buildId,
+                            totalInputBytes = totalBytes,
+                            sourceFileName = fileName
+                        ) { status, progress ->
+                            _patcherState.update {
+                                it.copy(
+                                    integrityStatus = status,
+                                    integrityProgress = progress
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val tempImg = File(context.cacheDir, "boot_${System.currentTimeMillis()}.img")
+                    copiedRawFile = tempImg
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalStateException("Unable to open selected image file.")
+                    inputStream.use { input ->
+                        tempImg.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    MagiskPatcherHelper.validateBootImageForPartition(tempImg, deviceData?.targetPartition)
+                    BootExtractionResult(tempImg, buildWarning = null)
+                }
+
+                _patcherState.value.bootFile?.let { oldFile ->
+                    if (oldFile.absolutePath != extractionResult.bootFile.absolutePath) {
+                        oldFile.delete()
+                    }
+                }
+
+                _patcherState.update {
+                    it.copy(
+                        bootFile = extractionResult.bootFile,
+                        bootFileName = extractionResult.bootFile.name,
+                        bootFileSize = String.format("%.1f MB", extractionResult.bootFile.length().toFloat() / (1024 * 1024)),
+                        integrityStatus = "IMAGE_LOADED",
+                        integrityProgress = 1f,
+                        imageWarning = extractionResult.buildWarning,
+                        imageError = null
+                    )
+                }
+            } catch (e: Exception) {
+                copiedRawFile?.delete()
+                _patcherState.update {
+                    it.copy(
+                        bootFile = null,
+                        bootFileName = "",
+                        bootFileSize = "",
+                        integrityStatus = "LOAD_FAILED",
+                        integrityProgress = 0f,
+                        imageWarning = null,
+                        imageError = e.message ?: "Failed to load firmware image."
+                    )
+                }
+                addPatcherPatchLog("Load boot file failed: ${e.message}", "ERROR")
+            }
+        }
+    }
+
+    private fun getUriSize(context: Context, uri: Uri): Long {
+        if (uri.scheme == "content") {
+            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (idx != -1 && !cursor.isNull(idx)) {
+                        return cursor.getLong(idx)
+                    }
+                }
+            }
+        }
+        return -1L
+    }
+
+    fun handleMagiskApkSelected(context: Context, uri: Uri) {
+        _patcherState.update {
+            it.copy(
+                appStatus = "STATUS: DECOMPRESSING",
+                extractProgress = 0.1f,
+                extractLogs = emptyList()
+            )
+        }
+        _patcherExtractLogs.value = emptyList()
+        addPatcherExtractLog("Scanning application: " + getFileName(context, uri))
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val tempApkFile = File(context.cacheDir, "magisk_temp_${System.currentTimeMillis()}.apk")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    tempApkFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                
+                addPatcherExtractLog("Processing archive entries...")
+                
+                val components = MagiskPatcherHelper.extractMagiskComponents(tempApkFile, context.cacheDir)
+                
+                for (name in components.keys) {
+                    addPatcherExtractLog("Decompressing $name...")
+                }
+                
+                addPatcherExtractLog("Extraction complete. Environment ready.")
+                
+                _patcherState.update {
+                    it.copy(
+                        magiskApkFile = tempApkFile,
+                        appStatus = "STATUS: DECOMPRESS_SUCCESS",
+                        extractProgress = 1f,
+                        magiskComponentsReady = true
+                    )
+                }
+            } catch (e: Exception) {
+                _patcherState.update {
+                    it.copy(
+                        appStatus = "STATUS: EXTRACTION_FAILED",
+                        extractProgress = 0f,
+                        magiskComponentsReady = false
+                    )
+                }
+                addPatcherExtractLog("Fatal error: ${e.message}")
+            }
+        }
+    }
+
+    fun startMagiskPatching(context: Context) {
+        val connection = _activeConnection.value as? OtgConnectionManager ?: return
+        val state = _patcherState.value
+        val bootFile = state.bootFile ?: return
+        val apkFile = state.magiskApkFile ?: return
+        
+        _patcherState.update {
+            it.copy(
+                patchStatus = "EXECUTING_PATCH",
+                patchProgress = 0.05f,
+                patchProgressLabel = "Initializing scoped workspace...",
+                patchLogs = emptyList()
+            )
+        }
+        _patcherPatchLogs.value = emptyList()
+        addPatcherPatchLog("Initializing scoped workspace...", "INFO")
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            val workspace = "/data/local/tmp/80bee_patcher"
+            try {
+                // 0. Clean & create workspace
+                connection.runShellCommand("rm -rf $workspace && mkdir -p $workspace")
+                
+                // 1. Push boot image
+                addPatcherPatchLog("Pushing boot image...", "INFO")
+                _patcherState.update { it.copy(patchProgress = 0.1f, patchProgressLabel = "Uploading boot image...") }
+                val remoteBootPath = "$workspace/boot.img"
+                connection.pushFile(FileInputStream(bootFile), bootFile.length(), remoteBootPath) { sent, total ->
+                    val progress = 0.1f + (sent.toFloat() / total) * 0.4f
+                    _patcherState.update {
+                        it.copy(
+                            patchProgress = progress,
+                            patchProgressLabel = "Uploading boot image (${String.format("%.1f MB", sent.toFloat() / (1024 * 1024))})..."
+                        )
+                    }
+                }
+                
+                // 2. Push Magisk components
+                addPatcherPatchLog("Pushing Magisk components...", "INFO")
+                _patcherState.update { it.copy(patchProgress = 0.5f, patchProgressLabel = "Pushing Magisk binaries...") }
+                
+                val extractedFiles = MagiskPatcherHelper.extractMagiskComponents(apkFile, context.cacheDir)
+                val totalComp = extractedFiles.size
+                var compIdx = 0
+                for ((name, file) in extractedFiles) {
+                    connection.pushFile(FileInputStream(file), file.length(), "$workspace/$name")
+                    compIdx++
+                    val progress = 0.5f + (compIdx.toFloat() / totalComp) * 0.15f
+                    _patcherState.update {
+                        it.copy(
+                            patchProgress = progress,
+                            patchProgressLabel = "Pushed $name"
+                        )
+                    }
+                }
+                
+                // 3. Set env and execute
+                addPatcherPatchLog("Executing boot_patch.sh...", "INFO")
+                _patcherState.update { it.copy(patchProgress = 0.7f, patchProgressLabel = "Setting permissions...") }
+                connection.runShellCommand("chmod +x $workspace/*")
+                
+                _patcherState.update { it.copy(patchProgress = 0.75f, patchProgressLabel = "Patching kernel image...") }
+                val patchCmd = "cd $workspace && export KEEPVERITY=true; export KEEPFORCEENCRYPT=true; export PATCHVBMETAFLAG=false; sh boot_patch.sh $remoteBootPath"
+                
+                connection.runShellCommandLive(patchCmd) { line ->
+                    addPatcherPatchLog(line, "PROMPT")
+                }
+                
+                // 4. Find patched file
+                addPatcherPatchLog("Locating patched image...", "INFO")
+                _patcherState.update { it.copy(patchProgress = 0.8f, patchProgressLabel = "Locating patched image...") }
+                val checkOut = connection.runShellCommand("ls $workspace/new-boot.img").trim()
+                if (checkOut.contains("No such file") || checkOut.isEmpty()) {
+                    throw Exception("Patched image not found! Script output was logged above.")
+                }
+                
+                // 5. Pull patched image
+                addPatcherPatchLog("Pulling patched image to host...", "INFO")
+                _patcherState.update { it.copy(patchProgress = 0.85f, patchProgressLabel = "Pulling patched image...") }
+                val remotePatchedPath = "$workspace/new-boot.img"
+                
+                val pulledBytes = connection.pullFile(remotePatchedPath) { received ->
+                    _patcherState.update {
+                        it.copy(
+                            patchProgressLabel = "Pulling patched image (${String.format("%.1f MB", received.toFloat() / (1024 * 1024))})..."
+                        )
+                    }
+                }
+                
+                val patchedFile = File(context.cacheDir, "patched_boot_${System.currentTimeMillis()}.img")
+                patchedFile.writeBytes(pulledBytes)
+                
+                // 6. Clean staging area
+                addPatcherPatchLog("Cleaning staging area...", "INFO")
+                _patcherState.update { it.copy(patchProgress = 0.95f, patchProgressLabel = "Cleaning up...") }
+                connection.runShellCommand("rm -rf $workspace")
+                
+                addPatcherPatchLog("Successfully patched and retrieved!", "SUCCESS")
+                _patcherState.update {
+                    it.copy(
+                        patchStatus = "SUCCESS",
+                        patchProgress = 1f,
+                        patchProgressLabel = "Patch complete!",
+                        patchedFile = patchedFile
+                    )
+                }
+            } catch (e: Exception) {
+                addPatcherPatchLog("Error: ${e.message}", "ERROR")
+                _patcherState.update {
+                    it.copy(
+                        patchStatus = "FAILED",
+                        patchProgress = 0f,
+                        patchProgressLabel = "Failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun rebootMagiskToBootloader() {
+        val connection = _activeConnection.value as? OtgConnectionManager ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            connection.runShellCommand("reboot bootloader")
+            _patcherState.update {
+                it.copy(
+                    fastbootStatus = "STATUS: REBOOT_SENT",
+                    flashStep = 2
+                )
+            }
+        }
+    }
+
+    fun flashMagiskPatchedImage() {
+        val connection = _activeConnection.value as? OtgConnectionManager ?: return
+        val state = _patcherState.value
+        val patchedFile = state.patchedFile ?: return
+        val deviceData = state.deviceData ?: return
+        val targetPartition = deviceData.targetPartition
+        
+        _patcherState.update {
+            it.copy(fastbootStatus = "STATUS: FLASHING_PARTITION")
+        }
+        addPatcherPatchLog("Writing patched image to $targetPartition...", "INFO")
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            var flashSuccess = false
+            var lastErrorMsg = ""
+            
+            try {
+                FileInputStream(patchedFile).use { fis ->
+                    val primaryResult = connection.flashFastbootImage(targetPartition, fis, patchedFile.length())
+                    if (primaryResult.contains("Successfully flashed")) {
+                        flashSuccess = true
+                    } else {
+                        lastErrorMsg = primaryResult
+                        addPatcherPatchLog("Flash to $targetPartition failed: $primaryResult", "WARNING")
+                    }
+                }
+
+                if (!flashSuccess) {
+                    val slot = deviceData.currentSlot
+                    if (slot.isNotEmpty() && !targetPartition.endsWith(slot)) {
+                        val slotted = "$targetPartition$slot"
+                        addPatcherPatchLog("Retrying flash with slot suffix ($slotted)...", "INFO")
+                        FileInputStream(patchedFile).use { fis ->
+                            val slottedResult = connection.flashFastbootImage(slotted, fis, patchedFile.length())
+                            if (slottedResult.contains("Successfully flashed")) {
+                                flashSuccess = true
+                            } else {
+                                lastErrorMsg = slottedResult
+                                addPatcherPatchLog("Slotted flash ($slotted) failed: $slottedResult", "WARNING")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                lastErrorMsg = e.message ?: "Unknown flash error"
+                addPatcherPatchLog("Flash error: ${e.message}", "WARNING")
+            }
+            
+            if (flashSuccess) {
+                addPatcherPatchLog("Flash complete!", "SUCCESS")
+                _patcherState.update {
+                    it.copy(
+                        fastbootStatus = "STATUS: FLASH_SUCCESS",
+                        flashComplete = true,
+                        flashStep = 3
+                    )
+                }
+            } else {
+                addPatcherPatchLog("Flash fatal error: $lastErrorMsg", "ERROR")
+                addPatcherPatchLog("Tip: Ensure device is in Bootloader/Fastboot mode and not userspace fastbootd.", "WARNING")
+                _patcherState.update {
+                    it.copy(fastbootStatus = "STATUS: FLASH_FAILED")
+                }
+            }
+        }
+    }
+
+    fun installMagiskApkFromPatcher() {
+        val connection = _activeConnection.value as? OtgConnectionManager ?: return
+        val state = _patcherState.value
+        val apkFile = state.magiskApkFile ?: return
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                connection.pushFile(FileInputStream(apkFile), apkFile.length(), "/data/local/tmp/magisk.apk")
+                val res = connection.runShellCommand("pm install -r /data/local/tmp/magisk.apk")
+                if (res.contains("Success", ignoreCase = true)) {
+                    _patcherState.update { it.copy(finalApkInstalled = true) }
+                    addPatcherPatchLog("Magisk Manager APK successfully installed on device!", "SUCCESS")
+                } else {
+                    addPatcherPatchLog("Failed to install APK: $res", "ERROR")
+                }
+                connection.runShellCommand("rm -f /data/local/tmp/magisk.apk")
+            } catch (e: Exception) {
+                addPatcherPatchLog("Failed to install APK: ${e.message}", "ERROR")
+            }
+        }
+    }
+
+    private fun addPatcherExtractLog(msg: String) {
+        android.util.Log.d("MainViewModel", "[EXTRACT] $msg")
+        val entry = LogEntry("INFO", msg)
+        _patcherExtractLogs.update { it + entry }
+        _patcherState.update { it.copy(extractLogs = it.extractLogs + entry) }
+    }
+
+    private fun addPatcherPatchLog(msg: String, type: String = "INFO") {
+        if (type == "ERROR") {
+            android.util.Log.e("MainViewModel", "[PATCH] $msg")
+        } else {
+            android.util.Log.d("MainViewModel", "[PATCH] [$type] $msg")
+        }
+        val entry = LogEntry(type, msg)
+        _patcherPatchLogs.update { it + entry }
+        _patcherState.update { it.copy(patchLogs = it.patchLogs + entry) }
+    }
 }
+
 

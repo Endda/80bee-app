@@ -20,7 +20,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.eightbee.app.connection.OtgConnectionManager
-import com.eightbee.app.connection.ShizukuConnectionManager
 import androidx.compose.foundation.layout.Box
 import com.eightbee.app.ui.DeviceDetectionScreen
 import com.eightbee.app.ui.MainScaffold
@@ -30,8 +29,6 @@ import com.eightbee.app.ui.theme.EightBeeAppTheme
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
-    private lateinit var shizukuManager: ShizukuConnectionManager
-    private lateinit var otgManager: OtgConnectionManager
     private lateinit var usbManager: UsbManager
 
     private val usbReceiver = object : BroadcastReceiver() {
@@ -48,12 +45,14 @@ class MainActivity : ComponentActivity() {
                     synchronized(this) {
                         if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
                             device?.let {
-                                otgManager.setDevice(it)
-                                if (viewModel.activeConnection.value is OtgConnectionManager) {
+                                val attached = viewModel.otgManager.setDevice(it)
+                                if (attached && viewModel.activeConnection.value is OtgConnectionManager) {
                                     viewModel.refreshSettings()
                                 }
-                                if (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle) {
-                                    viewModel.setActiveConnection(otgManager)
+                                if (viewModel.activeConnection.value !== viewModel.otgManager &&
+                                    (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle || viewModel.patcherState.value.isActive)
+                                ) {
+                                    viewModel.setActiveConnection(viewModel.otgManager)
                                 }
                             }
                         }
@@ -64,8 +63,9 @@ class MainActivity : ComponentActivity() {
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     device?.let {
-                        otgManager.setDevice(null)
-                        if (viewModel.activeConnection.value is OtgConnectionManager) {
+                        if (viewModel.otgManager.onDeviceDetached(it) &&
+                            viewModel.activeConnection.value is OtgConnectionManager
+                        ) {
                             viewModel.setActiveConnection(null)
                         }
                     }
@@ -76,10 +76,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        shizukuManager = ShizukuConnectionManager()
+
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
-        otgManager = OtgConnectionManager(this, usbManager)
 
         registerUsbReceiver()
         checkInitialUsbDevices()
@@ -92,14 +90,22 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val activeConnection by viewModel.activeConnection.collectAsState()
                     val bootloaderWizardState by viewModel.bootloaderWizardState.collectAsState()
+                    val patcherState by viewModel.patcherState.collectAsState()
 
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (activeConnection == null) {
+                        if (patcherState.isActive) {
+                            com.eightbee.app.ui.PixelMagiskPatcherScreen(
+                                viewModel = viewModel,
+                                onDismiss = {
+                                    viewModel.clearPatcherState()
+                                }
+                            )
+                        } else if (activeConnection == null) {
                             DeviceDetectionScreen(
-                                shizukuManager = shizukuManager,
-                                otgManager = otgManager,
+                                shizukuManager = viewModel.shizukuManager,
+                                otgManager = viewModel.otgManager,
                                 onRequestShizukuPermission = {
-                                    shizukuManager.requestPermission(SHIZUKU_REQUEST_CODE)
+                                    viewModel.shizukuManager.requestPermission(SHIZUKU_REQUEST_CODE)
                                 },
                                 onConnect = { connection ->
                                     viewModel.setActiveConnection(connection)
@@ -133,7 +139,7 @@ class MainActivity : ComponentActivity() {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_EXPORTED else 0
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RECEIVER_NOT_EXPORTED else 0
         registerReceiver(usbReceiver, filter, flags)
     }
 
@@ -161,12 +167,14 @@ class MainActivity : ComponentActivity() {
         if (isAdbOrFastboot) {
             Log.d("MainActivity", "  Device matches ADB/Fastboot interface! Has permission: ${usbManager.hasPermission(device)}")
             if (usbManager.hasPermission(device)) {
-                otgManager.setDevice(device)
-                if (viewModel.activeConnection.value is OtgConnectionManager) {
+                val attached = viewModel.otgManager.setDevice(device)
+                if (attached && viewModel.activeConnection.value is OtgConnectionManager) {
                     viewModel.refreshSettings()
                 }
-                if (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle) {
-                    viewModel.setActiveConnection(otgManager)
+                if (viewModel.activeConnection.value !== viewModel.otgManager &&
+                    (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle || viewModel.patcherState.value.isActive)
+                ) {
+                    viewModel.setActiveConnection(viewModel.otgManager)
                 }
             } else {
                 Log.d("MainActivity", "  Requesting USB permission...")
@@ -200,13 +208,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        shizukuManager.refresh()
+        viewModel.shizukuManager.refresh()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(usbReceiver)
-        otgManager.disconnect()
     }
 
     companion object {

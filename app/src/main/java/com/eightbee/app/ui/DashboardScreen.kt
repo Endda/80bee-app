@@ -13,11 +13,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
 import com.eightbee.app.Screen
+import com.eightbee.app.connection.OtgConnectionManager
 
 @Composable
 fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
     val outputText by viewModel.output.collectAsState()
     val isExecuting by viewModel.isExecuting.collectAsState()
+    val activeConnection by viewModel.activeConnection.collectAsState()
 
     Column(
         modifier = Modifier
@@ -68,6 +70,15 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        if (activeConnection is OtgConnectionManager) {
+            HomeLauncherCard(
+                title = "Pixel Magisk Patcher",
+                description = "Guided, client-side rooting orchestrator. Decompress, patch boot partition kernels, and flash over USB Fastboot.",
+                onClick = { viewModel.startPatcher() }
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // Home Tab Cards (Launchers)
         HomeLauncherCard(

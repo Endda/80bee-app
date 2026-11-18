@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,15 +19,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.BloatInfo
 import com.eightbee.app.MainViewModel
 import com.eightbee.app.PackageDatabase
 import com.eightbee.app.PresetPkg
+import com.eightbee.app.connection.ShizukuConnectionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +37,8 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val debloatList by viewModel.debloatList.collectAsState()
     val degoogleList by viewModel.degoogleList.collectAsState()
     val desamsungList by viewModel.desamsungList.collectAsState()
+    val activeConnection by viewModel.activeConnection.collectAsState()
+    val isLocalConnection = activeConnection is ShizukuConnectionManager
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: General, 1: De-Google, 2: De-Samsung, 3: Snapshot/Restore
     var safetyLevel by remember { mutableStateOf("recommended") }
@@ -46,14 +49,16 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     
     // Snapshot restore state
     var restoreList by remember { mutableStateOf<List<PresetPkg>>(emptyList()) }
+    var snapshotFeedback by remember { mutableStateOf<String?>(null) }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             val content = readUriText(context, it)
-            parseSnapshotAndCompare(context, viewModel, coroutineScope, content) { list ->
+            parseSnapshotAndCompare(viewModel, coroutineScope, content) { list, status ->
                 restoreList = list
+                snapshotFeedback = status
                 selectedTab = 3
             }
         }
@@ -65,7 +70,7 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Debloater & App Manager") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -101,7 +106,7 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            TabRow(selectedTabIndex = selectedTab) {
+            PrimaryTabRow(selectedTabIndex = selectedTab) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Bloat") })
                 Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Google") })
                 Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Samsung") })
@@ -150,6 +155,14 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                             labels = debloatList.associate { it.packageName to it.label },
                             descriptions = debloatList.associate { it.packageName to it.description },
                             checkedPackages = checkedPackages,
+                            riskFactors = debloatList.associate {
+                                it.packageName to if (it.safety.equals("recommended", ignoreCase = true) || it.safety.isBlank()) {
+                                    ""
+                                } else {
+                                    "Safety level: ${it.safety} — verify before removing."
+                                }
+                            },
+                            isLocalConnection = isLocalConnection,
                             onExecute = { isUninstall ->
                                 val selected = checkedPackages.filter { it.value }.keys.toList()
                                 viewModel.disablePackages(selected, isUninstall)
@@ -196,6 +209,8 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                             labels = degoogleList.associate { it.id to it.name },
                             descriptions = degoogleList.associate { it.id to it.description },
                             checkedPackages = checkedPackages,
+                            riskFactors = degoogleList.associate { it.id to it.riskFactor },
+                            isLocalConnection = isLocalConnection,
                             onExecute = { isUninstall ->
                                 val selected = checkedPackages.filter { it.value }.keys.toList()
                                 viewModel.disablePackages(selected, isUninstall)
@@ -242,6 +257,8 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                             labels = desamsungList.associate { it.id to it.name },
                             descriptions = desamsungList.associate { it.id to it.description },
                             checkedPackages = checkedPackages,
+                            riskFactors = desamsungList.associate { it.id to it.riskFactor },
+                            isLocalConnection = isLocalConnection,
                             onExecute = { isUninstall ->
                                 val selected = checkedPackages.filter { it.value }.keys.toList()
                                 viewModel.disablePackages(selected, isUninstall)
@@ -295,6 +312,18 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                                     Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Upload Snapshot")
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Upload Backup")
+                                }
+                                snapshotFeedback?.let { feedback ->
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = feedback,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (feedback.startsWith("Failed") || feedback.contains("Ignored")) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -364,7 +393,206 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     }
 }
 
-private fun createSnapshot(context: Context, viewModel: MainViewModel, scope: CoroutineScope) {
+@Composable
+fun PackageList(
+    packages: List<String>,
+    labels: Map<String, String>,
+    descriptions: Map<String, String>,
+    checkedPackages: MutableMap<String, Boolean>,
+    riskFactors: Map<String, String> = emptyMap(),
+    isRestore: Boolean = false,
+    isLocalConnection: Boolean = false,
+    onExecute: (isUninstall: Boolean) -> Unit
+) {
+    var allChecked by remember(packages) { mutableStateOf(false) }
+    var pendingConfirmUninstall by remember { mutableStateOf<Boolean?>(null) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            onClick = {
+                allChecked = !allChecked
+                packages.forEach { checkedPackages[it] = allChecked }
+            }
+        ) {
+            Text(if (allChecked) "Deselect All" else "Select All")
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // List of packages
+    packages.forEach { pkg ->
+        val risk = riskFactors[pkg]?.takeIf { it.isNotBlank() }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Checkbox(
+                checked = checkedPackages[pkg] ?: false,
+                onCheckedChange = { checkedPackages[pkg] = it }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(labels[pkg] ?: pkg, fontWeight = FontWeight.Bold)
+                Text(pkg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                descriptions[pkg]?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+                if (risk != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            imageVector = Icons.Filled.Warning,
+                            contentDescription = "Risk warning",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = risk,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    if (isRestore) {
+        Button(
+            onClick = {
+                if (packages.any { checkedPackages[it] == true }) {
+                    onExecute(false)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.Refresh, contentDescription = "Restore")
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Restore Selected")
+        }
+    } else {
+        val triggerAction = { isUninstall: Boolean ->
+            val selected = packages.filter { checkedPackages[it] == true }
+            if (selected.isNotEmpty()) {
+                val hasRisky = selected.any { !riskFactors[it].isNullOrBlank() }
+                if (hasRisky || (isLocalConnection && isUninstall)) {
+                    pendingConfirmUninstall = isUninstall
+                } else {
+                    onExecute(isUninstall)
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilledTonalButton(
+                onClick = { triggerAction(false) },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Disable")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Disable")
+            }
+            Button(
+                onClick = { triggerAction(true) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Uninstall")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Uninstall")
+            }
+        }
+    }
+
+    val confirmIsUninstall = pendingConfirmUninstall
+    if (confirmIsUninstall != null) {
+        val selected = packages.filter { checkedPackages[it] == true }
+        val riskySelected = selected.mapNotNull { pkg ->
+            riskFactors[pkg]?.takeIf { it.isNotBlank() }?.let { pkg to it }
+        }
+        AlertDialog(
+            onDismissRequest = { pendingConfirmUninstall = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(if (confirmIsUninstall) "Confirm Package Uninstall" else "Confirm High-Risk Disable")
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (isLocalConnection) {
+                        Text(
+                            text = "Local Shizuku connection active: removing a keyboard, launcher, or core service can lock you out of this device.",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Text(
+                        text = "${selected.size} package(s) selected" +
+                            if (riskySelected.isNotEmpty()) " (${riskySelected.size} with risk warnings):" else ".",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    riskySelected.forEach { (pkg, risk) ->
+                        Column(modifier = Modifier.padding(top = 4.dp)) {
+                            Text(
+                                text = labels[pkg] ?: pkg,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = risk,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingConfirmUninstall = null
+                        onExecute(confirmIsUninstall)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(if (confirmIsUninstall) "Uninstall Selected" else "Disable Selected")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmUninstall = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+internal fun createSnapshot(context: Context, viewModel: MainViewModel, scope: CoroutineScope) {
     val conn = viewModel.activeConnection.value ?: return
     scope.launch {
         viewModel.executeCommand("pm list packages")
@@ -392,23 +620,16 @@ private fun createSnapshot(context: Context, viewModel: MainViewModel, scope: Co
     }
 }
 
-private fun parseSnapshotAndCompare(
-    context: Context,
+internal fun parseSnapshotAndCompare(
     viewModel: MainViewModel,
     scope: CoroutineScope,
     content: String,
-    onCompareComplete: (List<PresetPkg>) -> Unit
+    onCompareComplete: (List<PresetPkg>, String?) -> Unit
 ) {
     val conn = viewModel.activeConnection.value ?: return
     scope.launch {
         try {
-            val obj = JSONObject(content)
-            val arr = obj.getJSONArray("packages")
-            val backupSet = mutableSetOf<String>()
-            for (i in 0 until arr.length()) {
-                backupSet.add(arr.getString(i))
-            }
-
+            val parsed = PackageDatabase.parseSnapshotPackageNames(content)
             val listOutput = conn.runShellCommand("pm list packages")
             val installed = listOutput.split("\n")
                 .map { it.trim() }
@@ -417,18 +638,24 @@ private fun parseSnapshotAndCompare(
                 .toSet()
 
             // Find missing apps that were in backup but not currently installed/enabled
-            val missing = backupSet.filter { !installed.contains(it) }
+            val missing = parsed.validPackages.filter { !installed.contains(it) }
             val mapped = missing.map {
                 PresetPkg(it, it, 1, "Backup snapshot package (uninstalled/disabled).", "")
             }
-            onCompareComplete(mapped)
+            val statusMsg = buildString {
+                append("Loaded ${mapped.size} missing package(s) from snapshot.")
+                if (parsed.rejectedCount > 0) {
+                    append(" Ignored ${parsed.rejectedCount} invalid package entry/entries.")
+                }
+            }
+            onCompareComplete(mapped, statusMsg)
         } catch (e: Exception) {
-            e.printStackTrace()
+            onCompareComplete(emptyList(), "Failed to parse snapshot JSON: ${e.message ?: "Invalid format"}")
         }
     }
 }
 
-private fun readUriText(context: Context, uri: Uri): String {
+internal fun readUriText(context: Context, uri: Uri): String {
     val sb = java.lang.StringBuilder()
     try {
         context.contentResolver.openInputStream(uri)?.use { stream ->

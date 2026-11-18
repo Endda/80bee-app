@@ -135,8 +135,9 @@ public class AdbProtocol {
 	 */
 	public static AdbMessage generateOpen(int localId, String dest) throws UnsupportedEncodingException
 	{
-		ByteBuffer bbuf = ByteBuffer.allocate(dest.length() + 1);
-		bbuf.put(dest.getBytes("UTF-8"));
+		byte[] destBytes = dest.getBytes("UTF-8");
+		ByteBuffer bbuf = ByteBuffer.allocate(destBytes.length + 1);
+		bbuf.put(destBytes);
 		bbuf.put((byte)0);
 		return generateMessage(CMD_OPEN, localId, 0, bbuf.array());
 	}

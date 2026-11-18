@@ -49,87 +49,76 @@ public class UsbChannel implements AdbChannel {
 
     @Override
     public void readx(byte[] buffer, int length) throws IOException {
+        int offset = 0;
+        int maxTransfer = 16384; // 16KB limit
 
-        UsbRequest usbRequest = getInRequest();
+        while (offset < length) {
+            int chunkLen = Math.min(length - offset, maxTransfer);
+            UsbRequest usbRequest = getInRequest();
+            ByteBuffer expected = ByteBuffer.allocate(chunkLen).order(ByteOrder.LITTLE_ENDIAN);
+            usbRequest.setClientData(expected);
 
-        ByteBuffer expected = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
-        usbRequest.setClientData(expected);
-
-        if (!usbRequest.queue(expected, length)) {
-            throw new IOException("fail to queue read UsbRequest");
-        }
-
-        while (true) {
-            UsbRequest wait = mDeviceConnection.requestWait();
-
-            if (wait == null) {
-                throw new IOException("Connection.requestWait return null");
+            if (!usbRequest.queue(expected, chunkLen)) {
+                throw new IOException("fail to queue read UsbRequest of size " + chunkLen);
             }
 
-            ByteBuffer clientData = (ByteBuffer) wait.getClientData();
-            wait.setClientData(null);
+            while (true) {
+                UsbRequest wait = mDeviceConnection.requestWait();
+                if (wait == null) {
+                    throw new IOException("Connection.requestWait returned null");
+                }
 
-            if (wait.getEndpoint() == mEndpointOut) {
-                // a write UsbRequest complete, just ignore
-            } else if (expected == clientData) {
-                releaseInRequest(wait);
-                break;
+                ByteBuffer clientData = (ByteBuffer) wait.getClientData();
+                wait.setClientData(null);
 
-            } else {
-                throw new IOException("unexpected behavior");
+                if (wait.getEndpoint() == mEndpointOut) {
+                    // a write UsbRequest completed, ignore
+                } else if (expected == clientData) {
+                    releaseInRequest(wait);
+                    break;
+                } else {
+                    throw new IOException("unexpected behavior");
+                }
             }
+
+            expected.flip();
+            int remaining = expected.remaining();
+            if (remaining == 0) {
+                throw new IOException("USB read returned 0 bytes");
+            }
+            expected.get(buffer, offset, remaining);
+            offset += remaining;
         }
-        expected.flip();
-        expected.get(buffer);
     }
 
-    // API LEVEL 18 is needed to invoke bulkTransfer(mEndpointOut, buffer, offset, buffer.length - offset, defaultTimeout)
-//    @Override
-//    public void writex(byte[] buffer) throws IOException{
-//
-//        int offset = 0;
-//        int transferred = 0;
-//
-//        while ((transferred = mDeviceConnection.bulkTransfer(mEndpointOut, buffer, offset, buffer.length - offset, defaultTimeout)) >= 0) {
-//            offset += transferred;
-//            if (offset >= buffer.length) {
-//                break;
-//            }
-//        }
-//        if (transferred < 0) {
-//            throw new IOException("bulk transfer fail");
-//        }
-//    }
-
-    // A dirty solution, only API level 12 is needed, not 18
-    private void writex(byte[] buffer) throws IOException{
-
+    private void writex(byte[] buffer) throws IOException {
         int offset = 0;
-        int transferred = 0;
+        int maxTransfer = 16384; // 16KB limit
 
-        byte[] tmp = new byte[buffer.length];
-        System.arraycopy(buffer, 0, tmp, 0, buffer.length);
+        while (offset < buffer.length) {
+            int chunkLen = Math.min(buffer.length - offset, maxTransfer);
+            byte[] tmp = new byte[chunkLen];
+            System.arraycopy(buffer, offset, tmp, 0, chunkLen);
 
-        while ((transferred = mDeviceConnection.bulkTransfer(mEndpointOut, tmp, buffer.length - offset, defaultTimeout)) >= 0) {
-            offset += transferred;
-            if (offset >= buffer.length) {
-                break;
-            } else {
-                System.arraycopy(buffer, offset, tmp, 0, buffer.length - offset);
+            int transferred = mDeviceConnection.bulkTransfer(mEndpointOut, tmp, chunkLen, defaultTimeout);
+            if (transferred < 0) {
+                throw new IOException("bulk transfer fail (write returned " + transferred + ")");
             }
-        }
-        if (transferred < 0) {
-            throw new IOException("bulk transfer fail");
+            if (transferred == 0) {
+                throw new IOException("bulk transfer timed out / sent 0 bytes");
+            }
+            offset += transferred;
         }
     }
 
     @Override
-    public void writex(AdbMessage message) throws IOException {
-        // TODO: here is the weirdest thing
-        // write (message.head + message.payload) is totally different with write(message.head) + write(head.payload)
+    public synchronized void writex(AdbMessage message) throws IOException {
+        // Keep header and payload as separate transfers for older adbd compatibility,
+        // synchronized so concurrent callers cannot interleave header/payload packets.
         writex(message.getMessage());
-        if (message.getPayload() != null) {
-            writex(message.getPayload());
+        byte[] payload = message.getPayload();
+        if (payload != null && payload.length > 0) {
+            writex(payload);
         }
     }
 

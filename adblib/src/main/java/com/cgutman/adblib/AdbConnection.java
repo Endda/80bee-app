@@ -6,6 +6,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.ConnectException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * This class represents an ADB connection.
@@ -18,7 +19,7 @@ public class AdbConnection implements Closeable {
 	/** The last allocated local stream ID. The ID
 	 * chosen for the next stream will be this value + 1.
 	 */
-	private int lastLocalId;
+	private final AtomicInteger lastLocalId;
 
 	/**
 	 * The backend thread that handles responding to ADB packets.
@@ -62,7 +63,7 @@ public class AdbConnection implements Closeable {
 	private AdbConnection()
 	{
 		openStreams = new ConcurrentHashMap<Integer, AdbStream>();
-		lastLocalId = 0;
+		lastLocalId = new AtomicInteger(0);
 		connectionThread = createConnectionThread();
 	}
 	
@@ -123,10 +124,11 @@ public class AdbConnection implements Closeable {
 								{
 									/* We're ready for writes */
 									waitingStream.updateRemoteId(msg.getArg0());
+									waitingStream.markOpened();
 									waitingStream.readyForWrite();
 
 									/* Unwait an open/write */
-									waitingStream.notify();
+									waitingStream.notifyAll();
 								}
 								else if (msg.getCommand() == AdbProtocol.CMD_WRTE)
 								{
@@ -277,14 +279,14 @@ public class AdbConnection implements Closeable {
 	 */
 	public AdbStream open(String destination) throws UnsupportedEncodingException, IOException, InterruptedException
 	{
-		int localId = ++lastLocalId;
+		int localId = lastLocalId.incrementAndGet();
 
 		if (!connectAttempted)
 			throw new IllegalStateException("connect() must be called first");
 
 		/* Wait for the connect response */
 		synchronized (this) {
-			if (!connected)
+			while (!connected && connectAttempted)
 				wait();
 
 			if (!connected) {
@@ -299,13 +301,15 @@ public class AdbConnection implements Closeable {
 		/* Send the open */
 		channel.writex(AdbProtocol.generateOpen(localId, destination));
 
-		/* Wait for the connection thread to receive the OKAY */
+		/* Wait for the connection thread to receive OKAY or CLSE */
 		synchronized (stream) {
-			stream.wait();
+			while (!stream.isOpened() && !stream.isClosed()) {
+				stream.wait();
+			}
 		}
 
-		/* Check if the open was rejected */
-		if (stream.isClosed())
+		/* Check if the open was rejected (closed before receiving OKAY) */
+		if (!stream.isOpened())
 			throw new ConnectException("Stream open actively rejected by remote peer");
 
 		/* We're fully setup now */

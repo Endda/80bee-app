@@ -22,7 +22,64 @@ data class PresetPkg(
     val riskFactor: String
 )
 
+data class SnapshotParseResult(
+    val validPackages: Set<String>,
+    val rejectedCount: Int
+)
+
 object PackageDatabase {
+    private val PACKAGE_NAME_REGEX = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)*$")
+    private val UNIVERSAL_OEM_TAGS = setOf("aosp", "qualcomm", "mediatek", "meta", "microsoft")
+    private val OEM_ALIASES = mapOf(
+        "lge" to "lg"
+    )
+
+    fun allowedSafetyLevels(safetyFilter: String): Set<String> {
+        return when (safetyFilter.trim().lowercase()) {
+            "recommended" -> setOf("recommended")
+            "advanced" -> setOf("recommended", "replaceable", "advanced")
+            "unsafe" -> setOf("recommended", "replaceable", "advanced", "expert", "danger")
+            else -> setOf("recommended")
+        }
+    }
+
+    fun matchesOem(oems: List<String>, manufacturer: String, brand: String = ""): Boolean {
+        if (oems.isEmpty()) return true
+        val normalizedManufacturer = normalizeOemTag(manufacturer)
+        val normalizedBrand = normalizeOemTag(brand)
+        return oems.any { rawTag ->
+            val tag = normalizeOemTag(rawTag)
+            tag in UNIVERSAL_OEM_TAGS ||
+                (normalizedManufacturer.isNotEmpty() && tag == normalizedManufacturer) ||
+                (normalizedBrand.isNotEmpty() && tag == normalizedBrand)
+        }
+    }
+
+    private fun normalizeOemTag(raw: String): String {
+        val lower = raw.trim().lowercase()
+        return OEM_ALIASES[lower] ?: lower
+    }
+
+    fun isValidPackageName(packageName: String): Boolean {
+        return packageName.isNotEmpty() && packageName.length <= 255 && PACKAGE_NAME_REGEX.matches(packageName)
+    }
+
+    fun parseSnapshotPackageNames(jsonContent: String): SnapshotParseResult {
+        val obj = JSONObject(jsonContent)
+        val arr = obj.getJSONArray("packages")
+        val valid = linkedSetOf<String>()
+        var rejected = 0
+        for (i in 0 until arr.length()) {
+            val item = arr.opt(i)
+            if (item is String && isValidPackageName(item)) {
+                valid.add(item)
+            } else {
+                rejected++
+            }
+        }
+        return SnapshotParseResult(valid, rejected)
+    }
+
     private var ultimateDb: Map<String, BloatInfo>? = null
     private var degoogleDb: List<PresetPkg>? = null
     private var samsungDb: List<PresetPkg>? = null
