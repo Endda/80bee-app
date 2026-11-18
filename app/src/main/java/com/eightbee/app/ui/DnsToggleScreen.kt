@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -25,7 +25,7 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Private DNS Manager") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -123,7 +123,7 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
             Text("Custom Private DNS Host", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)

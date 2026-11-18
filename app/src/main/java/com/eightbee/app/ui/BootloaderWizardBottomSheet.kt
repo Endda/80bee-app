@@ -615,7 +615,7 @@ fun PhysicalConfirmationPromptView(
                 modifier = Modifier.padding(start = 32.dp)
             )
             
-            Divider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
             
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Build, contentDescription = "Step 2", tint = MaterialTheme.colorScheme.primary)

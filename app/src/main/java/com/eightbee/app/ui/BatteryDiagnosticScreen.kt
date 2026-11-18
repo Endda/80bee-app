@@ -1,11 +1,16 @@
 package com.eightbee.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,8 +19,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.eightbee.app.BackgroundOperationService
 import com.eightbee.app.MainViewModel
+
+@Composable
+internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -> Unit {
+    val context = LocalContext.current
+    val currentOnProceed by rememberUpdatedState(onProceed)
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        currentOnProceed()
+    }
+    return {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            currentOnProceed()
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,6 +50,9 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val isMonitoring by BackgroundOperationService.isMonitoringBattery.collectAsState()
     val telemetryText by BackgroundOperationService.batteryTelemetry.collectAsState()
+    val startMonitoringWithPermission = rememberNotificationPermissionLauncher {
+        viewModel.startBatteryMonitoring(context)
+    }
 
     Scaffold(
         topBar = {
@@ -30,7 +60,7 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Battery Diagnostics") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -82,7 +112,7 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                         if (isMonitoring) {
                             viewModel.stopBatteryMonitoring(context)
                         } else {
-                            viewModel.startBatteryMonitoring(context)
+                            startMonitoringWithPermission()
                         }
                     }
                 ) {
@@ -184,4 +214,91 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+fun BatteryMetricsView(data: BatteryMetrics) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Key Telemetry",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            MetricRow("Level", "${data.level}%")
+            MetricRow("Health", data.healthString)
+            MetricRow("Temperature", "${data.temp}°C")
+            MetricRow("Voltage", "${data.voltage} V")
+            MetricRow("Power Source", if (data.isCharging) "Charging (AC/USB)" else "Battery (Discharging)")
+        }
+    }
+}
+
+@Composable
+fun MetricRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontWeight = FontWeight.SemiBold)
+        Text(value, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+data class BatteryMetrics(
+    val level: Int,
+    val temp: Double,
+    val voltage: Double,
+    val isCharging: Boolean,
+    val healthString: String
+)
+
+fun parseBatteryDumpsys(raw: String): BatteryMetrics {
+    var level = 0
+    var temp = 0.0
+    var voltage = 0.0
+    var isCharging = false
+    var health = 1
+
+    val lines = raw.split("\n")
+    for (line in lines) {
+        val trimmed = line.trim()
+        when {
+            trimmed.startsWith("level:") -> {
+                level = trimmed.substringAfter("level:").trim().toIntOrNull() ?: 0
+            }
+            trimmed.startsWith("temperature:") || trimmed.startsWith("temp:") -> {
+                val tempRaw = trimmed.substringAfter("temp:").substringAfter("temperature:").trim().toDoubleOrNull() ?: 0.0
+                temp = tempRaw / 10.0 // dumpsys temp is in tenths of a degree
+            }
+            trimmed.startsWith("voltage:") -> {
+                val voltRaw = trimmed.substringAfter("voltage:").trim().toDoubleOrNull() ?: 0.0
+                voltage = voltRaw / 1000.0 // dumpsys voltage is in millivolts
+            }
+            trimmed.startsWith("AC powered: true") || trimmed.startsWith("USB powered: true") || trimmed.startsWith("Wireless powered: true") -> {
+                isCharging = true
+            }
+            trimmed.startsWith("health:") -> {
+                health = trimmed.substringAfter("health:").trim().toIntOrNull() ?: 1
+            }
+        }
+    }
+
+    val healthStr = when (health) {
+        2 -> "Good"
+        3 -> "Overheat"
+        4 -> "Dead"
+        5 -> "Over Voltage"
+        6 -> "Unspecified Failure"
+        7 -> "Cold"
+        else -> "Unknown"
+    }
+
+    return BatteryMetrics(level, temp, voltage, isCharging, healthStr)
 }

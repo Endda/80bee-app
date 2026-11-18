@@ -214,13 +214,22 @@ fun AdvancedAppLauncherCard(
 
 @Composable
 fun AboutTab() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = remember(context) {
+        try {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3"
+        } catch (_: Exception) {
+            "1.3"
+        }
+    }
     Column(
         modifier = androidx.compose.ui.Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text("80bee", style = MaterialTheme.typography.displayMedium)
-        Text("Version 1.0.0", style = MaterialTheme.typography.bodyLarge)
+        Text("Version $versionName", style = MaterialTheme.typography.bodyLarge)
         Spacer(modifier = androidx.compose.ui.Modifier.height(32.dp))
         Text("Built with Material Design 3", style = MaterialTheme.typography.bodySmall)
     }

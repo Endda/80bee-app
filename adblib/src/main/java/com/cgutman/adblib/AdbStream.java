@@ -28,7 +28,10 @@ public class AdbStream implements Closeable {
 	private Queue<byte[]> readQueue;
 	
 	/** Indicates whether the connection is closed already */
-	private boolean isClosed;
+	private volatile boolean isClosed;
+
+	/** Indicates whether the remote peer accepted the stream open (CMD_OKAY) */
+	private volatile boolean isOpened;
 	
 	/**
 	 * Creates a new AdbStream object on the specified AdbConnection
@@ -43,6 +46,7 @@ public class AdbStream implements Closeable {
 		this.readQueue = new ConcurrentLinkedQueue<byte[]>();
 		this.writeReady = new AtomicBoolean(false);
 		this.isClosed = false;
+		this.isOpened = false;
 	}
 	
 	/**
@@ -86,6 +90,22 @@ public class AdbStream implements Closeable {
 	}
 
 	/**
+	 * Called by the connection thread when the remote peer accepts the stream open.
+	 */
+	void markOpened()
+	{
+		this.isOpened = true;
+	}
+
+	/**
+	 * Returns whether the remote peer has acknowledged opening this stream.
+	 */
+	boolean isOpened()
+	{
+		return isOpened;
+	}
+
+	/**
 	 * Called by the connection thread to notify that the stream was closed by the peer.
 	 */
 	void notifyClose()
@@ -109,19 +129,17 @@ public class AdbStream implements Closeable {
 	 * @throws java.io.IOException If the stream fails while waiting
 	 */
 	public byte[] read() throws InterruptedException, IOException {
-		byte[] data = null;
 		synchronized (readQueue) {
-			/* Wait for the connection to close or data to be received */
-			while (!isClosed && (data = readQueue.poll()) == null) {
+			byte[] data;
+			/* Drain any queued packets before reporting stream closure */
+			while ((data = readQueue.poll()) == null) {
+				if (isClosed) {
+					throw new IOException("Stream closed");
+				}
 				readQueue.wait();
 			}
-
-
-			if (isClosed) {
-				throw new IOException("Stream closed");
-			}
+			return data;
 		}
-		return data;
 	}
 
 	/**

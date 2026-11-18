@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,7 +26,7 @@ fun UiAdjustmentsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("UI Adjustments") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -98,7 +98,7 @@ fun UiAdjustmentsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
             Text("UI Density (DPI Override)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -106,10 +106,18 @@ fun UiAdjustmentsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             Text("Change the physical viewport density. Input custom density, or reset to stock settings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(16.dp))
 
+            val parsedDpi = customDpiText.trim().toIntOrNull()
+            val isDpiValid = parsedDpi != null && parsedDpi in 120..800
+            val showDpiError = customDpiText.isNotBlank() && !isDpiValid
+
             OutlinedTextField(
                 value = customDpiText,
                 onValueChange = { customDpiText = it },
-                label = { Text("Custom Density (e.g. 400, 450)") },
+                label = { Text("Custom Density (120–800, e.g. 400)") },
+                isError = showDpiError,
+                supportingText = if (showDpiError) {
+                    { Text("Enter a safe DPI value between 120 and 800.") }
+                } else null,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -120,13 +128,12 @@ fun UiAdjustmentsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             ) {
                 Button(
                     onClick = {
-                        val dpi = customDpiText.toIntOrNull()
-                        if (dpi != null) {
-                            viewModel.executeCommand("wm density $dpi")
+                        if (parsedDpi != null && isDpiValid) {
+                            viewModel.executeCommand("wm density $parsedDpi")
                         }
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = customDpiText.isNotEmpty()
+                    enabled = isDpiValid
                 ) {
                     Text("Apply DPI")
                 }

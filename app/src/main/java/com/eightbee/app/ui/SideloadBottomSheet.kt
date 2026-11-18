@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -209,7 +210,7 @@ fun ConfigView(
         }
     }
 
-    Divider(color = MaterialTheme.colorScheme.outlineVariant)
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     Spacer(modifier = Modifier.height(16.dp))
 
     // Archive/splits indicator
@@ -224,7 +225,7 @@ fun ConfigView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    Icons.Filled.List, 
+                    Icons.AutoMirrored.Filled.List, 
                     contentDescription = "Archive Info",
                     tint = MaterialTheme.colorScheme.onSecondaryContainer
                 )

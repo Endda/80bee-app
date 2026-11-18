@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,7 +22,7 @@ fun BootManagerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Boot Manager") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -68,7 +68,7 @@ fun BootManagerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 onClick = { viewModel.executeCommand("reboot") }
             )
 
-            Divider(modifier = Modifier.padding(vertical = 12.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             BootActionRow(
                 title = "Recovery Mode",
@@ -77,7 +77,7 @@ fun BootManagerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 onClick = { viewModel.executeCommand("reboot recovery") }
             )
 
-            Divider(modifier = Modifier.padding(vertical = 12.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             BootActionRow(
                 title = "Bootloader (Fastboot)",
@@ -86,7 +86,7 @@ fun BootManagerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 onClick = { viewModel.executeCommand("reboot bootloader") }
             )
 
-            Divider(modifier = Modifier.padding(vertical = 12.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             BootActionRow(
                 title = "Fastbootd Mode",

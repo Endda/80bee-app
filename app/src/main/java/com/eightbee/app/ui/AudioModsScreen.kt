@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,7 +22,7 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Audio Modifications") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -74,7 +74,7 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = { viewModel.executeAudioBypass(android.os.Build.VERSION.SDK_INT) },
+                    onClick = { viewModel.executeAudioBypass() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Bypass CSD Volume Limiter")
@@ -82,7 +82,7 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
             Column(modifier = Modifier.fillMaxWidth()) {

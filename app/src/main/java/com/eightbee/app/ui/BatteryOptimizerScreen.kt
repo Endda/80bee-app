@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,20 +20,19 @@ import com.eightbee.app.MainViewModel
 @Composable
 fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
+    val optimizerState by viewModel.batteryOptimizerState.collectAsState()
+    val activeConnection by viewModel.activeConnection.collectAsState()
     val context = LocalContext.current
 
-    var maxHibernationState by remember { mutableStateOf(false) }
-    var dozeZeroState by remember { mutableStateOf(false) }
-    var bgDrainState by remember { mutableStateOf(false) }
-    var refreshRateState by remember { mutableStateOf(false) }
-    var windowBlursState by remember { mutableStateOf(false) }
-    var samsungCpuState by remember { mutableStateOf(false) }
-    var samsungRamPlusState by remember { mutableStateOf(false) }
-    var samsungMotionState by remember { mutableStateOf(false) }
-    var superDimState by remember { mutableStateOf(false) }
+    LaunchedEffect(activeConnection) {
+        viewModel.refreshBatteryOptimizerState()
+    }
 
     val compileProgress by BackgroundOperationService.compileProgress.collectAsState()
     val isCompiling by BackgroundOperationService.isCompiling.collectAsState()
+    val startCompileWithPermission = rememberNotificationPermissionLauncher {
+        viewModel.startArtCompilation(context)
+    }
 
     Scaffold(
         topBar = {
@@ -41,7 +40,7 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Battery Optimizer") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -116,7 +115,7 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
             Text("Deep Standby Modifications", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -128,9 +127,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Restricts battery sync tasks, cuts idle wake lock intervals, and enforces background app deep sleep.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = maxHibernationState,
+                    checked = optimizerState.maxHibernation,
                     onCheckedChange = {
-                        maxHibernationState = it
                         if (it) viewModel.applyMaxHibernation() else viewModel.restoreMaxHibernation()
                     }
                 )
@@ -144,9 +142,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Stops battery status checks, telemetry synchronizations, and system logs while in standby.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = dozeZeroState,
+                    checked = optimizerState.dozeZero,
                     onCheckedChange = {
-                        dozeZeroState = it
                         if (it) viewModel.applyDozeZero() else viewModel.restoreDozeZero()
                     }
                 )
@@ -160,9 +157,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Traces periodic background task wakelocks and stops battery leaking.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = bgDrainState,
+                    checked = optimizerState.backgroundDrainMonitor,
                     onCheckedChange = {
-                        bgDrainState = it
                         viewModel.setBackgroundDrainMonitor(it)
                     }
                 )
@@ -176,9 +172,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Halves screen GPU refreshes to dramatically decrease active usage power consumption.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = refreshRateState,
+                    checked = optimizerState.lockRefreshRate60,
                     onCheckedChange = {
-                        refreshRateState = it
                         viewModel.setLockRefreshRate60(it)
                     }
                 )
@@ -192,9 +187,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Bypasses GPU blur calculations for system notification shades and folders.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = windowBlursState,
+                    checked = optimizerState.disableWindowBlurs,
                     onCheckedChange = {
-                        windowBlursState = it
                         viewModel.setDisableWindowBlurs(it)
                     }
                 )
@@ -208,16 +202,15 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Applies a custom hardware color matrix to dim pixels below normal hardware bounds.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = superDimState,
+                    checked = optimizerState.superDim,
                     onCheckedChange = {
-                        superDimState = it
                         if (it) viewModel.applySuperDim() else viewModel.restoreSuperDim()
                     }
                 )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
             Text("Samsung OEM Customizations", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -231,9 +224,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Stops Samsung's booster thread which spikes CPU clock speeds during scroll actions.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = samsungCpuState,
+                    checked = optimizerState.samsungCpuBoosterOff,
                     onCheckedChange = {
-                        samsungCpuState = it
                         viewModel.setSamsungCpuResponsiveness(!it)
                     }
                 )
@@ -247,9 +239,8 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Disables secondary storage-based paging (zRAM swap) to save flash memory read/writes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = samsungRamPlusState,
+                    checked = optimizerState.samsungRamPlusOff,
                     onCheckedChange = {
-                        samsungRamPlusState = it
                         viewModel.setSamsungRamPlusOff(it)
                     }
                 )
@@ -263,16 +254,15 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     Text("Disables secondary OEM sensors and motion predictors that scan body orientations in the background.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
-                    checked = samsungMotionState,
+                    checked = optimizerState.samsungMotionEngineOff,
                     onCheckedChange = {
-                        samsungMotionState = it
                         viewModel.setSamsungMotionEngineOff(it)
                     }
                 )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
             Text("ART Compilation (AOT Optimizer)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -293,7 +283,7 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { viewModel.startArtCompilation(context) },
+                    onClick = { startCompileWithPermission() },
                     enabled = !isCompiling,
                     modifier = Modifier.weight(1f)
                 ) {

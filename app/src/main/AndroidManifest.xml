@@ -9,9 +9,10 @@
     <!-- Shizuku requirement for observing the Shizuku provider -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
-    <!-- Foreground Service permissions -->
+    <!-- Foreground Service & Notification permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
         <package android:name="moe.shizuku.manager" />
