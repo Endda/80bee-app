@@ -952,26 +952,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startSideload(context: Context, uri: Uri) {
+        val prevState = _sideloadState.value
+        if (prevState is SideloadState.ConfigReady) {
+            prevState.apkFiles.forEach { it.delete() }
+        }
         viewModelScope.launch(Dispatchers.IO) {
             _sideloadState.value = SideloadState.CopyingAndParsing
+            val tempFiles = mutableListOf<File>()
             try {
                 val contentResolver = context.contentResolver
                 val fileName = getFileName(context, uri)
-                val isArchive = fileName.endsWith(".zip", true) || 
-                                fileName.endsWith(".apks", true) || 
+                val isArchive = fileName.endsWith(".zip", true) ||
+                                fileName.endsWith(".apks", true) ||
                                 fileName.endsWith(".xapk", true)
-                
-                val tempFiles = mutableListOf<File>()
+
                 var explicitBaseApk: File? = null
                 if (isArchive) {
-                    contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val archiveStream = contentResolver.openInputStream(uri)
+                        ?: throw java.io.IOException("Unable to open selected archive.")
+                    archiveStream.use { inputStream ->
                         val zipInputStream = ZipInputStream(inputStream)
                         var entry = zipInputStream.nextEntry
                         var bytesLeft = maxSideloadBytes
                         while (entry != null) {
                             if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
                                 if (tempFiles.size >= maxSideloadApkEntries) {
-                                    tempFiles.forEach { it.delete() }
                                     throw java.io.IOException("Archive contains too many APK files.")
                                 }
                                 val baseName = File(entry.name).name
@@ -980,13 +985,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (baseName.equals("base.apk", ignoreCase = true) && explicitBaseApk == null) {
                                     explicitBaseApk = tempFile
                                 }
-                                try {
-                                    tempFile.outputStream().use { outputStream ->
-                                        bytesLeft -= copyBounded(zipInputStream, outputStream, bytesLeft)
-                                    }
-                                } catch (e: java.io.IOException) {
-                                    tempFiles.forEach { it.delete() }
-                                    throw e
+                                tempFile.outputStream().use { outputStream ->
+                                    bytesLeft -= copyBounded(zipInputStream, outputStream, bytesLeft)
                                 }
                             }
                             zipInputStream.closeEntry()
@@ -996,12 +996,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 } else {
                     val tempFile = File(context.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
-                    contentResolver.openInputStream(uri)?.use { inputStream ->
+                    tempFiles.add(tempFile)
+                    val apkStream = contentResolver.openInputStream(uri)
+                        ?: throw java.io.IOException("Unable to open selected APK file.")
+                    apkStream.use { inputStream ->
                         tempFile.outputStream().use { outputStream ->
-                            inputStream.copyTo(outputStream)
+                            copyBounded(inputStream, outputStream, maxSideloadBytes)
                         }
                     }
-                    tempFiles.add(tempFile)
                 }
 
                 if (tempFiles.isEmpty()) {
@@ -1060,6 +1062,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     archiveName = fileName
                 )
             } catch (e: Exception) {
+                tempFiles.forEach { it.delete() }
                 _sideloadState.value = SideloadState.Error("Failed to parse APK: ${e.localizedMessage ?: e.message}", InstallStep.CHECK_CONNECTION)
             }
         }
@@ -1145,6 +1148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 completedSteps.add(InstallStep.STREAM_APKS)
             } catch (e: Exception) {
+                runCatching { connection.runShellCommand("cmd package install-abandon $sessionId") }
                 _sideloadState.value = SideloadState.Error(e.message ?: "Failed to stream APKs", InstallStep.STREAM_APKS)
                 config.apkFiles.forEach { it.delete() }
                 return@launch
@@ -1214,6 +1218,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         state.bootFile?.delete()
         state.magiskApkFile?.delete()
         state.patchedFile?.delete()
+        File(getApplication<Application>().cacheDir, "magisk_components").deleteRecursively()
         _patcherState.value = PixelMagiskPatcherState(isActive = false)
         _patcherExtractLogs.value = emptyList()
         _patcherPatchLogs.value = emptyList()
@@ -1249,47 +1254,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!connection.isAvailable()) {
                     throw Exception("ADB Connection is still initializing or unauthorized. Please ensure target device is unlocked and authorize the USB debugging prompt on the target device screen.")
                 }
-                
-                val codename = connection.runShellCommand("getprop ro.product.device").trim()
-                if (codename.startsWith("Error", ignoreCase = true)) {
-                    throw Exception(codename)
+
+                suspend fun readProp(prop: String): String {
+                    val value = connection.runShellCommand("getprop $prop").trim()
+                    if (value.startsWith("Error", ignoreCase = true)) {
+                        throw Exception(value)
+                    }
+                    return value
                 }
-                val buildId = connection.runShellCommand("getprop ro.build.display.id").trim()
-                val apiLevelStr = connection.runShellCommand("getprop ro.product.first_api_level").trim()
-                val apiLevel = apiLevelStr.toIntOrNull() ?: 30
-                val previewSdkStr = connection.runShellCommand("getprop ro.build.version.preview_sdk").trim()
+
+                val codename = readProp("ro.product.device")
+                val buildId = readProp("ro.build.display.id")
+                val apiLevelStr = readProp("ro.product.first_api_level")
+                val boardApiLevelStr = if (apiLevelStr.isEmpty()) readProp("ro.board.first_api_level") else ""
+                val vendorApiLevelStr = if (apiLevelStr.isEmpty() && boardApiLevelStr.isEmpty()) readProp("ro.vendor.api_level") else ""
+                val previewSdkStr = readProp("ro.build.version.preview_sdk")
                 val previewSdk = previewSdkStr.toIntOrNull() ?: 0
-                val buildCodename = connection.runShellCommand("getprop ro.build.version.codename").trim()
-                val abi = connection.runShellCommand("getprop ro.product.cpu.abi").trim()
-                val oemAllowedStr = connection.runShellCommand("getprop sys.oem_unlock_allowed").trim()
-                val oemAllowed = oemAllowedStr == "1"
-                val currentSlot = connection.runShellCommand("getprop ro.boot.slot_suffix").trim()
-                
-                val flashLocked = connection.runShellCommand("getprop ro.boot.flash.locked").trim()
-                val vbState = connection.runShellCommand("getprop ro.boot.verifiedbootstate").trim()
+                val buildCodename = readProp("ro.build.version.codename")
+                val abi = readProp("ro.product.cpu.abi")
+                val oemAllowed = readProp("sys.oem_unlock_allowed") == "1"
+                val currentSlot = readProp("ro.boot.slot_suffix")
+
+                val flashLocked = readProp("ro.boot.flash.locked")
+                val vbState = readProp("ro.boot.verifiedbootstate")
                 val isUnlocked = flashLocked == "0" || vbState == "orange"
-                
+
                 val isBeta = previewSdk > 0 || buildCodename != "REL" || buildId.contains("beta", ignoreCase = true) || buildId.contains("preview", ignoreCase = true)
-                
-                if (!abi.contains("arm64-v8a")) {
-                    throw Exception("Unsupported Architecture: $abi. This tool requires ARM64.")
-                }
-                
-                val pixel6Series = listOf("oriole", "raven", "bluejay")
-                val isPixel6 = pixel6Series.contains(codename.lowercase())
-                val targetPartition = if (!isPixel6 && apiLevel >= 33) "init_boot" else "boot"
-                
+
+                val resolution = MagiskPatcherHelper.resolveReconTarget(
+                    codename = codename,
+                    abi = abi,
+                    firstApiLevelRaw = apiLevelStr,
+                    boardApiLevelRaw = boardApiLevelStr,
+                    vendorApiLevelRaw = vendorApiLevelStr
+                )
+
                 val deviceData = MagiskDeviceData(
                     codename = codename,
                     buildId = buildId,
-                    apiLevel = apiLevel,
+                    apiLevel = resolution.apiLevel,
                     previewSdk = previewSdk,
                     isBeta = isBeta,
                     abi = abi,
                     oemAllowed = oemAllowed,
                     currentSlot = currentSlot,
                     isUnlocked = isUnlocked,
-                    targetPartition = targetPartition
+                    targetPartition = resolution.targetPartition
                 )
                 
                 _patcherState.update {
@@ -1437,24 +1447,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         addPatcherExtractLog("Scanning application: " + getFileName(context, uri))
         
         viewModelScope.launch(Dispatchers.IO) {
+            val tempApkFile = File(context.cacheDir, "magisk_temp_${System.currentTimeMillis()}.apk")
+            val componentsDir = File(context.cacheDir, "magisk_components")
             try {
-                val tempApkFile = File(context.cacheDir, "magisk_temp_${System.currentTimeMillis()}.apk")
-                context.contentResolver.openInputStream(uri)?.use { input ->
+                val apkStream = context.contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException("Unable to open selected Magisk APK.")
+                apkStream.use { input ->
                     tempApkFile.outputStream().use { output ->
                         input.copyTo(output)
                     }
                 }
-                
+
                 addPatcherExtractLog("Processing archive entries...")
-                
-                val components = MagiskPatcherHelper.extractMagiskComponents(tempApkFile, context.cacheDir)
-                
+
+                componentsDir.deleteRecursively()
+                componentsDir.mkdirs()
+                val components = MagiskPatcherHelper.extractMagiskComponents(tempApkFile, componentsDir)
+
                 for (name in components.keys) {
                     addPatcherExtractLog("Decompressing $name...")
                 }
-                
+
+                _patcherState.value.magiskApkFile?.let { oldApk ->
+                    if (oldApk.absolutePath != tempApkFile.absolutePath) {
+                        oldApk.delete()
+                    }
+                }
+
                 addPatcherExtractLog("Extraction complete. Environment ready.")
-                
+
                 _patcherState.update {
                     it.copy(
                         magiskApkFile = tempApkFile,
@@ -1464,6 +1485,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } catch (e: Exception) {
+                tempApkFile.delete()
+                componentsDir.deleteRecursively()
                 _patcherState.update {
                     it.copy(
                         appStatus = "STATUS: EXTRACTION_FAILED",
@@ -1516,20 +1539,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 2. Push Magisk components
                 addPatcherPatchLog("Pushing Magisk components...", "INFO")
                 _patcherState.update { it.copy(patchProgress = 0.5f, patchProgressLabel = "Pushing Magisk binaries...") }
-                
-                val extractedFiles = MagiskPatcherHelper.extractMagiskComponents(apkFile, context.cacheDir)
-                val totalComp = extractedFiles.size
-                var compIdx = 0
-                for ((name, file) in extractedFiles) {
-                    connection.pushFile(FileInputStream(file), file.length(), "$workspace/$name")
-                    compIdx++
-                    val progress = 0.5f + (compIdx.toFloat() / totalComp) * 0.15f
-                    _patcherState.update {
-                        it.copy(
-                            patchProgress = progress,
-                            patchProgressLabel = "Pushed $name"
-                        )
+
+                val componentsDir = File(context.cacheDir, "magisk_components")
+                componentsDir.deleteRecursively()
+                componentsDir.mkdirs()
+                try {
+                    val extractedFiles = MagiskPatcherHelper.extractMagiskComponents(apkFile, componentsDir)
+                    val totalComp = extractedFiles.size
+                    var compIdx = 0
+                    for ((name, file) in extractedFiles) {
+                        connection.pushFile(FileInputStream(file), file.length(), "$workspace/$name")
+                        compIdx++
+                        val progress = 0.5f + (compIdx.toFloat() / totalComp) * 0.15f
+                        _patcherState.update {
+                            it.copy(
+                                patchProgress = progress,
+                                patchProgressLabel = "Pushed $name"
+                            )
+                        }
                     }
+                } finally {
+                    componentsDir.deleteRecursively()
                 }
                 
                 // 3. Set env and execute
@@ -1566,7 +1596,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 
                 val patchedFile = File(context.cacheDir, "patched_boot_${System.currentTimeMillis()}.img")
-                patchedFile.writeBytes(pulledBytes)
+                try {
+                    patchedFile.writeBytes(pulledBytes)
+                    MagiskPatcherHelper.validateBootImageForPartition(
+                        patchedFile,
+                        _patcherState.value.deviceData?.targetPartition
+                    )
+                } catch (e: Exception) {
+                    patchedFile.delete()
+                    throw e
+                }
+
+                _patcherState.value.patchedFile?.let { oldPatched ->
+                    if (oldPatched.absolutePath != patchedFile.absolutePath) {
+                        oldPatched.delete()
+                    }
+                }
                 
                 // 6. Clean staging area
                 addPatcherPatchLog("Cleaning staging area...", "INFO")
