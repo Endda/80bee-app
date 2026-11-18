@@ -25,11 +25,41 @@ data class BootExtractionResult(
     val buildWarning: String? = null
 )
 
+data class ReconTargetResolution(
+    val apiLevel: Int,
+    val targetPartition: String
+)
+
 object MagiskPatcherHelper {
     private const val TAG = "MagiskPatcherHelper"
     private val ANDROID_BOOT_MAGIC = "ANDROID!".toByteArray(StandardCharsets.US_ASCII)
     private const val BOOT_HEADER_PROBE_SIZE = 64
     private const val MAX_ANDROID_INFO_BYTES = 64 * 1024
+    private val PIXEL_6_SERIES = setOf("oriole", "raven", "bluejay")
+
+    fun resolveReconTarget(
+        codename: String,
+        abi: String,
+        firstApiLevelRaw: String,
+        boardApiLevelRaw: String = "",
+        vendorApiLevelRaw: String = ""
+    ): ReconTargetResolution {
+        val cleanCodename = codename.trim()
+        if (cleanCodename.isEmpty()) {
+            throw IllegalArgumentException("Failed to read device codename (ro.product.device was empty).")
+        }
+        if (!abi.contains("arm64-v8a")) {
+            throw IllegalArgumentException("Unsupported Architecture: $abi. This tool requires ARM64.")
+        }
+        val apiLevel = listOf(firstApiLevelRaw, boardApiLevelRaw, vendorApiLevelRaw)
+            .firstNotNullOfOrNull { raw -> raw.trim().toIntOrNull()?.takeIf { it > 0 } }
+            ?: throw IllegalArgumentException(
+                "Unable to determine device first API level (ro.product.first_api_level was empty). Reconnect ADB and retry."
+            )
+        val isPixel6 = cleanCodename.lowercase() in PIXEL_6_SERIES
+        val targetPartition = if (!isPixel6 && apiLevel >= 33) "init_boot" else "boot"
+        return ReconTargetResolution(apiLevel = apiLevel, targetPartition = targetPartition)
+    }
 
     fun isZipMagic(headerBytes: ByteArray, length: Int = headerBytes.size): Boolean {
         return length >= 4 &&

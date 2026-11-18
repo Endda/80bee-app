@@ -189,4 +189,71 @@ class MagiskPatcherHelperTest {
         assertTrue(threw)
         assertEquals(0, cache.listFiles()?.size ?: 0)
     }
+
+    @Test
+    fun resolveReconTarget_choosesPartitionAndRejectsMissingApiLevel() {
+        val pixel8 = MagiskPatcherHelper.resolveReconTarget(
+            codename = "shiba",
+            abi = "arm64-v8a",
+            firstApiLevelRaw = "34"
+        )
+        assertEquals(34, pixel8.apiLevel)
+        assertEquals("init_boot", pixel8.targetPartition)
+
+        // Pixel 6 series always uses boot even if first/vendor API >= 33
+        val pixel6 = MagiskPatcherHelper.resolveReconTarget(
+            codename = "Raven",
+            abi = "arm64-v8a",
+            firstApiLevelRaw = "31"
+        )
+        assertEquals(31, pixel6.apiLevel)
+        assertEquals("boot", pixel6.targetPartition)
+
+        val fallbackBoard = MagiskPatcherHelper.resolveReconTarget(
+            codename = "husky",
+            abi = "arm64-v8a",
+            firstApiLevelRaw = "",
+            boardApiLevelRaw = "34"
+        )
+        assertEquals(34, fallbackBoard.apiLevel)
+        assertEquals("init_boot", fallbackBoard.targetPartition)
+
+        var threwEmptyApi = false
+        try {
+            MagiskPatcherHelper.resolveReconTarget(
+                codename = "shiba",
+                abi = "arm64-v8a",
+                firstApiLevelRaw = "",
+                boardApiLevelRaw = "",
+                vendorApiLevelRaw = ""
+            )
+        } catch (e: IllegalArgumentException) {
+            threwEmptyApi = true
+        }
+        assertTrue(threwEmptyApi)
+
+        var threwBlankCodename = false
+        try {
+            MagiskPatcherHelper.resolveReconTarget(
+                codename = "  ",
+                abi = "arm64-v8a",
+                firstApiLevelRaw = "34"
+            )
+        } catch (e: IllegalArgumentException) {
+            threwBlankCodename = true
+        }
+        assertTrue(threwBlankCodename)
+
+        var threwNonArm64 = false
+        try {
+            MagiskPatcherHelper.resolveReconTarget(
+                codename = "shiba",
+                abi = "armeabi-v7a",
+                firstApiLevelRaw = "34"
+            )
+        } catch (e: IllegalArgumentException) {
+            threwNonArm64 = true
+        }
+        assertTrue(threwNonArm64)
+    }
 }

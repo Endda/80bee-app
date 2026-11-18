@@ -91,9 +91,6 @@ dependencies {
 
     // ADB over OTG (Local Module)
     implementation(project(":adblib"))
-    
-    // Fastboot over OTG
-    implementation("io.github.rohitverma882:fastboot-java:1.2.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

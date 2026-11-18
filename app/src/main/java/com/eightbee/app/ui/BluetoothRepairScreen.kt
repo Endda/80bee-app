@@ -108,7 +108,7 @@ fun BluetoothRepairScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             // Advanced Fix
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text("Advanced Repair (Clear Storage)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Warning: On Shizuku connections, directory clearance is restricted. On USB OTG, it resets cache fully. Can clear system Bluetooth preferences.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Warning: Clears Bluetooth app data via pm clear and cycles Airplane Mode (Android 11+). Can reset system Bluetooth preferences or pairings on some OEMs.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.height(8.dp))
                 FilledTonalButton(
                     onClick = { viewModel.executeBluetoothRepair(selectedOem, true) },
