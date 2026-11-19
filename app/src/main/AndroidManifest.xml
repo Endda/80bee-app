@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- USB Host API requirements -->
-    <uses-feature android:name="android.hardware.usb.host" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     
     <!-- Shizuku requirement for observing the Shizuku provider -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
