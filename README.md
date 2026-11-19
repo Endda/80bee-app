@@ -2,7 +2,7 @@
 
 [![Google Play Store](https://img.shields.io/badge/Google_Play-Approved-3DDC84?logo=google-play&logoColor=white)](https://play.google.com/store/apps/details?id=com.eightybee.app)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/Endda/80bee-app?color=007ACC&logo=github)](https://github.com/Endda/80bee-app/releases)
-[![License](https://img.shields.io/badge/License-Apache_2.0-orange.svg?logo=apache)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android_8.0+-229900?logo=android&logoColor=white)](https://developer.android.com/about/versions)
 
 **80bee** is a native, standalone Android utility designed for complete, root-free device management. It brings the power of developer tools like ADB (Android Debug Bridge) and Fastboot directly into a clean, modern, Material Design 3 interface.
@@ -20,11 +20,14 @@ I research, test, and implement the features on the 80bee.com website. . .then t
 ## 🚀 Key Features
 
 *   **⚡ Boot Manager:** Reboot any device (local or connected via OTG) to System, Bootloader, Fastboot, or Recovery modes.
-*   **📱 Speed Tweaker:** Modify window/transition/animator scaling values or adjust the display density (DPI) dynamically.
-*   **🔒 DNS Toggle:** Configure system-wide Private DNS settings (Opportunistic, Custom Hostnames, or Off).
-*   **🔋 Battery Optimizer:** Manage adaptive battery status, toggle deep Doze modes, and adjust background service configurations.
-*   **📦 Debloater Manager:** Uninstall, disable, or re-enable pre-installed system apps and bloatware (`pm disable` / `pm uninstall`).
-*   **📥 Sideload Bypass:** Sideload APK files and bypass Android's target SDK limitations (e.g., installing legacy apps on Android 14+).
+*   **📱 UI Adjustments:** Modify window/transition/animator scales or adjust display density (DPI) dynamically.
+*   **🔒 Private DNS Toggle:** Configure system-wide Private DNS settings (Automatic, Custom Hostnames, or Off).
+*   **🔋 Battery Optimizer & Diagnostics:** Manage Adaptive Battery, Doze policies, ART AOT speed compilation, live battery telemetry, and unplug/level simulation.
+*   **📦 Debloater Manager:** Scan, disable, or uninstall pre-installed system apps with snapshot backup/restore and OEM/safety filtering.
+*   **📥 APK / Split-APK Sideloader:** Install single APKs, `.apkm`/`.xapk`/`.apks` bundles with optional legacy target-SDK bypass.
+*   **🎧 Audio Mods & Bluetooth Repair:** Adjust safe-volume/CSD warning thresholds, restart/clear Bluetooth stacks, and apply OEM Doze exemptions.
+*   **🛠️ Bootloader & Pixel Magisk Patcher:** Guided bootloader lock/unlock wizard, OTG Fastboot utilities, and a 6-step Pixel `init_boot`/`boot` Magisk patching workflow.
+*   **🏠 Home Assistant Installer:** Deploy Home Assistant Core inside Termux via ADB.
 
 ---
 
@@ -32,9 +35,9 @@ I research, test, and implement the features on the 80bee.com website. . .then t
 
 80bee is written in **Kotlin** with **Jetpack Compose** and leverages:
 *   **[Shizuku API](https://github.com/RikkaApps/Shizuku-API):** Communicates with the local Shizuku service to run privileged shell commands root-free.
-*   **[libsu](https://github.com/topjohnwu/libsu):** Handles root/shell script execution interfaces safely.
-*   **[fastboot-java](https://github.com/rohitverma882/fastboot-java):** Fastboot protocol implementation over USB host for bootloader interaction.
-*   **Android USB Host API:** Interacts with the USB controller directly to communicate via raw USB protocols for OTG debugging.
+*   **[adblib](adblib/LICENSE):** Vendored Java ADB protocol implementation (based on `cgutman/AdbLib` with USB OTG channel extensions) for device-to-device ADB over USB Host.
+*   **Custom `FastbootUsbClient`:** Direct USB bulk-transfer Fastboot protocol client built on Android's USB Host API for bootloader inspection and flashing.
+*   **Android USB Host API:** Interacts with the USB controller directly for OTG ADB and Fastboot communication.
 
 ---
 
@@ -59,27 +62,31 @@ To control another device:
 You can build 80bee locally using Android Studio or the command line.
 
 ### Command Line Build
-To compile the universal release APK:
+To compile the debug APK locally:
 ```powershell
 # Clone the repository
 git clone https://github.com/Endda/80bee-app.git
 cd 80bee-app
 
-# Compile and sign the release APK
-./gradlew :app:assembleRelease
+# Compile the debug APK
+./gradlew :app:assembleDebug
 ```
-The output signed APK will be generated at `app/build/outputs/apk/release/app-release.apk`.
+The output APK will be generated at `app/build/outputs/apk/debug/app-debug.apk`. (Release builds require a local `keystore.properties` signing configuration.)
 
 ---
 
 ## ⚠️ Disclaimer
 
 80bee is a powerful utility designed for developers and power users.
-*   Modifying system settings, disabling critical package packages, or flashing boot partitions via Fastboot can cause bootloops or system instability.
+*   Modifying system settings, disabling critical packages, or flashing boot partitions via Fastboot can cause bootloops or system instability.
 *   Use this application at your own risk. The developer is not responsible for any bricked devices or loss of data.
 
 ---
 
-## 📄 License
+## 📄 License & Attributions
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** - see the [LICENSE](LICENSE) file for details.
+
+### Third-Party Notices
+*   **[adblib](adblib/LICENSE):** Based on [cgutman/AdbLib](https://github.com/cgutman/AdbLib) (Copyright (c) 2013, Cameron Gutman, BSD 3-Clause License) with USB OTG channel extensions by xudong.
+*   **[Universal Android Debloater Next Generation (UAD-NG)](https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation)** & **[BloatwareHatao](https://github.com/ImKKingshuk/BloatwareHatao):** Package metadata and descriptions in `app/src/main/assets/80bee_ultimate_db.json` are derived from UAD-NG and BloatwareHatao (GPL-3.0).

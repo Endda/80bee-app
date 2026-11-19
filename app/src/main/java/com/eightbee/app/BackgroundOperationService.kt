@@ -1,11 +1,9 @@
 package com.eightbee.app
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -29,6 +27,7 @@ class BackgroundOperationService : Service() {
         private const val CHANNEL_ID = "background_ops_channel"
         private const val BATTERY_MONITOR_MAX_DURATION_MS = 30 * 60 * 1000L
 
+        @Volatile
         var connectionManager: ConnectionManager? = null
 
         private val _compileProgress = MutableStateFlow("")
@@ -48,6 +47,7 @@ class BackgroundOperationService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
     private var compileJob: Job? = null
     private var batteryJob: Job? = null
+    private var isForegroundStarted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -66,6 +66,10 @@ class BackgroundOperationService : Service() {
         if (_isCompiling.value || _isMonitoringBattery.value) {
             updateNotification()
         } else {
+            if (!isForegroundStarted) {
+                // Ensure startForeground() is called before stopSelf() if launched via startForegroundService().
+                updateNotification()
+            }
             checkStopSelf()
         }
         return START_NOT_STICKY
@@ -91,6 +95,7 @@ class BackgroundOperationService : Service() {
             _batteryTelemetry.value = "Battery monitor stopped: foreground service time limit reached."
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
+        isForegroundStarted = false
         stopSelf(startId)
     }
 
@@ -133,6 +138,8 @@ class BackgroundOperationService : Service() {
                     conn.runShellCommand("pm compile -f -m speed $pkg")
                 }
                 _compileProgress.value = "Compilation complete! Compiled $total apps."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _compileProgress.value = "Compilation error: ${e.message}"
             } finally {
@@ -175,6 +182,8 @@ class BackgroundOperationService : Service() {
                     updateNotification()
                     delay(5000)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _batteryTelemetry.value = "Error: ${e.message}"
             } finally {
@@ -202,20 +211,21 @@ class BackgroundOperationService : Service() {
     private fun checkStopSelf() {
         if (!_isCompiling.value && !_isMonitoringBattery.value) {
             stopForeground(STOP_FOREGROUND_REMOVE)
+            isForegroundStarted = false
             stopSelf()
         }
     }
 
     private fun updateNotification() {
-        val title = "80bee Background Service"
-        var text = "Service is active"
+        val title = getString(R.string.bg_service_notification_title)
+        var text = getString(R.string.bg_service_status_active)
 
         if (_isCompiling.value && _isMonitoringBattery.value) {
-            text = "Compiling apps & monitoring battery..."
+            text = getString(R.string.bg_service_status_both)
         } else if (_isCompiling.value) {
             text = _compileProgress.value
         } else if (_isMonitoringBattery.value) {
-            text = "Monitoring battery status..."
+            text = getString(R.string.bg_service_status_battery)
         }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -228,24 +238,29 @@ class BackgroundOperationService : Service() {
         if (_isCompiling.value) {
             builder.addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Stop Compile",
+                getString(R.string.bg_service_action_stop_compile),
                 createStopPendingIntent(ACTION_STOP_COMPILE, 1)
             )
         }
         if (_isMonitoringBattery.value) {
             builder.addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Stop Monitor",
+                getString(R.string.bg_service_action_stop_monitor),
                 createStopPendingIntent(ACTION_STOP_BATTERY_MONITOR, 2)
             )
         }
 
         val notification = builder.build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        if (!isForegroundStarted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            isForegroundStarted = true
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
         }
     }
 
@@ -262,20 +277,23 @@ class BackgroundOperationService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                CHANNEL_ID,
-                "Background Operations Channel",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(serviceChannel)
-        }
+        val serviceChannel = NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.bg_service_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(serviceChannel)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        compileJob?.cancel()
+        batteryJob?.cancel()
         serviceJob.cancel()
+        _isCompiling.value = false
+        _isMonitoringBattery.value = false
+        isForegroundStarted = false
     }
 
     override fun onBind(intent: Intent?): IBinder? {

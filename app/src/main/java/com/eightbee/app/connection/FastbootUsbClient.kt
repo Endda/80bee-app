@@ -16,30 +16,18 @@ data class FastbootReply(
     val info: List<String> = emptyList()
 )
 
-/**
- * Minimal USB Fastboot protocol client with chunked data transfers and INFO-loop response handling.
- */
-class FastbootUsbClient(
+internal interface FastbootTransport : Closeable {
+    fun bulkWrite(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int
+    fun bulkRead(buffer: ByteArray, length: Int, timeoutMs: Int): Int
+}
+
+private class UsbFastbootTransport(
     private val usbInterface: UsbInterface,
     private val connection: UsbDeviceConnection
-) : Closeable {
-
-    companion object {
-        private const val MAX_USB_TRANSFER = 16384 // 16 KB chunks stay within usbfs transfer limits
-        private const val DEFAULT_COMMAND_TIMEOUT_MS = 10_000
-        private const val DATA_TRANSFER_TIMEOUT_MS = 10_000
-        private const val DATA_COMPLETE_TIMEOUT_MS = 30_000
-        private const val FLASH_TIMEOUT_MS = 60_000
-        private const val RESPONSE_BUFFER_SIZE = 256
-        private const val MAX_INFO_PACKETS = 500
-    }
+) : FastbootTransport {
 
     private val inEndpoint: UsbEndpoint
     private val outEndpoint: UsbEndpoint
-    private val lock = Any()
-
-    @Volatile
-    private var closed = false
 
     init {
         var foundIn: UsbEndpoint? = null
@@ -61,6 +49,53 @@ class FastbootUsbClient(
             throw IOException("Failed to claim Fastboot USB interface.")
         }
     }
+
+    override fun bulkWrite(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int {
+        return connection.bulkTransfer(outEndpoint, buffer, offset, length, timeoutMs)
+    }
+
+    override fun bulkRead(buffer: ByteArray, length: Int, timeoutMs: Int): Int {
+        return connection.bulkTransfer(inEndpoint, buffer, length, timeoutMs)
+    }
+
+    override fun close() {
+        try {
+            connection.releaseInterface(usbInterface)
+        } catch (_: Exception) {
+        }
+        try {
+            connection.close()
+        } catch (_: Exception) {
+        }
+    }
+}
+
+/**
+ * Minimal USB Fastboot protocol client with chunked data transfers and INFO-loop response handling.
+ */
+class FastbootUsbClient internal constructor(
+    private val transport: FastbootTransport
+) : Closeable {
+
+    constructor(
+        usbInterface: UsbInterface,
+        connection: UsbDeviceConnection
+    ) : this(UsbFastbootTransport(usbInterface, connection))
+
+    companion object {
+        internal const val MAX_USB_TRANSFER = 16384 // 16 KB chunks stay within usbfs transfer limits
+        internal const val DEFAULT_COMMAND_TIMEOUT_MS = 10_000
+        internal const val DATA_TRANSFER_TIMEOUT_MS = 10_000
+        internal const val DATA_COMPLETE_TIMEOUT_MS = 30_000
+        internal const val FLASH_TIMEOUT_MS = 60_000
+        private const val RESPONSE_BUFFER_SIZE = 256
+        private const val MAX_INFO_PACKETS = 500
+    }
+
+    private val lock = Any()
+
+    @Volatile
+    private var closed = false
 
     fun sendCommand(command: String, timeoutMs: Int = timeoutForCommand(command)): FastbootReply {
         synchronized(lock) {
@@ -121,7 +156,7 @@ class FastbootUsbClient(
         var offset = 0
         while (offset < length) {
             val chunkLen = minOf(length - offset, MAX_USB_TRANSFER)
-            val transferred = connection.bulkTransfer(outEndpoint, buffer, offset, chunkLen, timeoutMs)
+            val transferred = transport.bulkWrite(buffer, offset, chunkLen, timeoutMs)
             if (transferred < 0) {
                 throw IOException("Fastboot USB write failed ($transferred) at offset $offset/$length")
             }
@@ -138,7 +173,7 @@ class FastbootUsbClient(
         var infoCount = 0
 
         while (true) {
-            val bytesRead = connection.bulkTransfer(inEndpoint, buf, buf.size, timeoutMs)
+            val bytesRead = transport.bulkRead(buf, buf.size, timeoutMs)
             if (bytesRead < 0) {
                 throw IOException("Fastboot USB read failed or timed out ($bytesRead)")
             }
@@ -186,13 +221,6 @@ class FastbootUsbClient(
     override fun close() {
         if (closed) return
         closed = true
-        try {
-            connection.releaseInterface(usbInterface)
-        } catch (_: Exception) {
-        }
-        try {
-            connection.close()
-        } catch (_: Exception) {
-        }
+        transport.close()
     }
 }

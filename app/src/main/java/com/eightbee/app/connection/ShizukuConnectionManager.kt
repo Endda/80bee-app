@@ -1,5 +1,6 @@
 package com.eightbee.app.connection
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -18,6 +19,19 @@ class ShizukuConnectionManager : ConnectionManager {
 
     private val _isAvailableFlow = MutableStateFlow(isAvailable())
     override val isAvailableFlow: StateFlow<Boolean> = _isAvailableFlow.asStateFlow()
+
+    @Volatile
+    private var listenersRegistered = false
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        refresh()
+    }
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        refresh()
+    }
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
+        refresh()
+    }
 
     private val newProcessMethod: Method by lazy {
         // Shizuku.newProcess is private in API v13; cache the reflective handle once.
@@ -107,7 +121,33 @@ class ShizukuConnectionManager : ConnectionManager {
             }
             Shizuku.requestPermission(requestCode)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("ShizukuConnectionManager", "Failed to request Shizuku permission", e)
+        }
+    }
+
+    fun startListening() {
+        if (listenersRegistered) return
+        try {
+            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(permissionResultListener)
+            listenersRegistered = true
+        } catch (e: Exception) {
+            Log.w("ShizukuConnectionManager", "Failed to register Shizuku listeners", e)
+        }
+        refresh()
+    }
+
+    fun close() {
+        if (!listenersRegistered) return
+        try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(permissionResultListener)
+        } catch (e: Exception) {
+            Log.w("ShizukuConnectionManager", "Failed to unregister Shizuku listeners", e)
+        } finally {
+            listenersRegistered = false
         }
     }
 

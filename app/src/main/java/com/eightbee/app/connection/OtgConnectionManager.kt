@@ -40,22 +40,23 @@ class OtgConnectionManager(
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    private var connectedDevice: UsbDevice? = null
-    private var adbConnection: AdbConnection? = null
-    private var fastbootClient: FastbootUsbClient? = null
-    private var adbCrypto: AdbCrypto? = null
-    private var connectionJob: Job? = null
+    private val stateLock = Any()
 
-    init {
-        setupCrypto()
-    }
+    @Volatile private var connectedDevice: UsbDevice? = null
+    @Volatile private var adbConnection: AdbConnection? = null
+    @Volatile private var fastbootClient: FastbootUsbClient? = null
+    @Volatile private var connectionJob: Job? = null
+    @Volatile private var pendingDisconnectJob: Job? = null
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Load/generate the 2048-bit RSA ADB keypair off the main thread; connectDevice() awaits this.
+    private val cryptoDeferred: Deferred<AdbCrypto?> = ioScope.async { loadOrGenerateCrypto() }
 
-    private fun setupCrypto() {
+    private fun loadOrGenerateCrypto(): AdbCrypto? {
         val base64 = AdbBase64Impl()
         val privateKey = File(context.filesDir, "private_key")
         val publicKey = File(context.filesDir, "public_key")
 
-        adbCrypto = if (privateKey.exists() && publicKey.exists()) {
+        var crypto: AdbCrypto? = if (privateKey.exists() && publicKey.exists()) {
             try {
                 AdbCrypto.loadAdbKeyPair(base64, privateKey, publicKey)
             } catch (e: Exception) {
@@ -65,14 +66,15 @@ class OtgConnectionManager(
             null
         }
 
-        if (adbCrypto == null) {
+        if (crypto == null) {
             try {
-                adbCrypto = AdbCrypto.generateAdbKeyPair(base64)
-                adbCrypto?.saveAdbKeyPair(privateKey, publicKey)
+                crypto = AdbCrypto.generateAdbKeyPair(base64)
+                crypto?.saveAdbKeyPair(privateKey, publicKey)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to setup crypto", e)
             }
         }
+        return crypto
     }
 
     fun setDevice(device: UsbDevice?): Boolean {
@@ -94,7 +96,7 @@ class OtgConnectionManager(
         if (usbManager.hasPermission(device)) {
             Log.d(TAG, "Permission already granted for ${device.deviceName}")
             if (current != null || adbConnection != null || fastbootClient != null) {
-                disconnect()
+                pendingDisconnectJob = disconnect()
             }
             connectedDevice = device
             connectDevice()
@@ -145,8 +147,9 @@ class OtgConnectionManager(
 
         connectionJob?.cancel()
         _connectionState.value = ConnectionState.Connecting
-        
-        connectionJob = CoroutineScope(Dispatchers.IO).launch {
+
+        connectionJob = ioScope.launch {
+            pendingDisconnectJob?.join()
             var openedConnection: android.hardware.usb.UsbDeviceConnection? = null
             var pendingAdb: AdbConnection? = null
             var pendingFastboot: FastbootUsbClient? = null
@@ -154,7 +157,12 @@ class OtgConnectionManager(
             try {
                 val connection = usbManager.openDevice(device) ?: run {
                     Log.e(TAG, "Failed to open USB device connection")
-                    _connectionState.value = ConnectionState.Disconnected
+                    synchronized(stateLock) {
+                        if (connectedDevice == device) {
+                            connectedDevice = null
+                            _connectionState.value = ConnectionState.Disconnected
+                        }
+                    }
                     return@launch
                 }
                 openedConnection = connection
@@ -164,30 +172,47 @@ class OtgConnectionManager(
                 }
 
                 if (adbInterface != null) {
-                    val crypto = adbCrypto ?: run {
+                    val crypto = cryptoDeferred.await() ?: run {
                         Log.e(TAG, "AdbCrypto not initialized")
-                        _connectionState.value = ConnectionState.Disconnected
+                        synchronized(stateLock) {
+                            if (connectedDevice == device) {
+                                connectedDevice = null
+                                _connectionState.value = ConnectionState.Disconnected
+                            }
+                        }
                         return@launch
                     }
-                    
+
                     val channel = UsbChannel(connection, adbInterface)
                     val newAdbConnection = AdbConnection.create(channel, crypto)
                     pendingAdb = newAdbConnection
                     newAdbConnection.connect()
-                    
-                    adbConnection = newAdbConnection
-                    committed = true
-                    _isAvailableFlow.value = true
-                    _connectionState.value = ConnectionState.AdbConnected
-                    Log.d(TAG, "ADB Connection successful for ${device.deviceName}")
+
+                    synchronized(stateLock) {
+                        if (connectedDevice == device && isActive) {
+                            adbConnection = newAdbConnection
+                            committed = true
+                            _isAvailableFlow.value = true
+                            _connectionState.value = ConnectionState.AdbConnected
+                        }
+                    }
+                    if (committed) {
+                        Log.d(TAG, "ADB Connection successful for ${device.deviceName}")
+                    }
                 } else if (fastbootInterface != null) {
                     val client = FastbootUsbClient(fastbootInterface, connection)
                     pendingFastboot = client
-                    fastbootClient = client
-                    committed = true
-                    _isAvailableFlow.value = true
-                    _connectionState.value = ConnectionState.FastbootConnected
-                    Log.d(TAG, "Fastboot Connection successful for ${device.deviceName}")
+                    synchronized(stateLock) {
+                        if (connectedDevice == device && isActive) {
+                            fastbootClient = client
+                            committed = true
+                            _isAvailableFlow.value = true
+                            _connectionState.value = ConnectionState.FastbootConnected
+                        }
+                    }
+                    if (committed) {
+                        Log.d(TAG, "Fastboot Connection successful for ${device.deviceName}")
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -206,29 +231,34 @@ class OtgConnectionManager(
         }
     }
 
-    fun disconnect() {
-        connectionJob?.cancel()
-        _isAvailableFlow.value = false
-        _connectionState.value = ConnectionState.Disconnected
-        
-        val currentAdb = adbConnection
-        val currentFb = fastbootClient
-        
-        adbConnection = null
-        fastbootClient = null
-        connectedDevice = null
+    fun disconnect(): Job {
+        val currentAdb: AdbConnection?
+        val currentFb: FastbootUsbClient?
+        synchronized(stateLock) {
+            connectionJob?.cancel()
+            connectionJob = null
+            _isAvailableFlow.value = false
+            _connectionState.value = ConnectionState.Disconnected
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                currentAdb?.close()
-            } catch (e: Exception) {
-                // Ignore
-            }
-            try {
-                currentFb?.close()
-            } catch (e: Exception) {
-                // Ignore
-            }
+            currentAdb = adbConnection
+            currentFb = fastbootClient
+
+            adbConnection = null
+            fastbootClient = null
+            connectedDevice = null
+        }
+
+        return ioScope.launch(NonCancellable) {
+            runCatching { currentAdb?.close() }
+            runCatching { currentFb?.close() }
+        }
+    }
+
+    fun close() {
+        val cleanupJob = disconnect()
+        ioScope.launch(NonCancellable) {
+            cleanupJob.join()
+            ioScope.cancel()
         }
     }
 
@@ -285,7 +315,7 @@ class OtgConnectionManager(
                         currentStream.write(chunk)
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("OtgConnectionManager", "Error writing stream input", e)
                 }
             }
 

@@ -9,9 +9,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -19,10 +21,13 @@ fun BootloaderUtilitiesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Bootloader Utilities") },
+                title = { Text(stringResource(R.string.bootloader_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
                     }
                 }
             )
@@ -35,20 +40,19 @@ fun BootloaderUtilitiesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Description card
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Hardware Security Flashing",
+                        text = stringResource(R.string.bootloader_card_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Unlocking the bootloader allows booting custom kernels, recovery partitions (TWRP), and custom ROMs (LineageOS). Warning: Unlocking/Relocking the bootloader triggers a hardware factory reset and wipes all user data on the device.",
+                        text = stringResource(R.string.bootloader_card_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -57,18 +61,30 @@ fun BootloaderUtilitiesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Bootloader Controls", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.bootloader_controls_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Unlock Bootloader", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Triggers the hardware unlocking sequence. Requires physical confirmation on the device volume/power keys.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.bootloader_unlock_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    stringResource(R.string.bootloader_unlock_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = { viewModel.startBootloaderWizard(true) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Unlock Bootloader")
+                    Text(stringResource(R.string.bootloader_unlock_button))
                 }
             }
 
@@ -77,14 +93,22 @@ fun BootloaderUtilitiesScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Relock Bootloader", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Locks the bootloader back to stock parameters. Ensure you have stock firmware partitions flashed first to avoid hard-bricking.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.bootloader_relock_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    stringResource(R.string.bootloader_relock_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 FilledTonalButton(
                     onClick = { viewModel.startBootloaderWizard(false) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Lock Bootloader")
+                    Text(stringResource(R.string.bootloader_lock_button))
                 }
             }
         }

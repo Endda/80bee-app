@@ -9,9 +9,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -19,10 +21,13 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Audio Modifications") },
+                title = { Text(stringResource(R.string.audio_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
                     }
                 }
             )
@@ -35,20 +40,19 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Description card
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Calculated Sound Dose (CSD) Bypass",
+                        text = stringResource(R.string.audio_csd_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Android 14+ introduces strict Calculated Sound Dose monitoring which aggressively dampens headphone and Bluetooth playback volumes once rolling safety limits are exceeded. Bypassing this stops the system warnings and automatic volume throttling.",
+                        text = stringResource(R.string.audio_csd_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -57,18 +61,21 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Audio Control Actions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.audio_actions_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Action rows
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "Bypass System Volume Throttling",
+                    stringResource(R.string.audio_bypass_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "Overrides the safe volume index and resets the sound dose calculation keys dynamically in secure settings. Prevents the volume limit popup.",
+                    stringResource(R.string.audio_bypass_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -77,7 +84,7 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     onClick = { viewModel.executeAudioBypass() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Bypass CSD Volume Limiter")
+                    Text(stringResource(R.string.audio_bypass_button))
                 }
             }
 
@@ -87,12 +94,12 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "Restore Default Sound Dose Safeguards",
+                    stringResource(R.string.audio_restore_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    "Deletes the bypass keys and re-enables standard Android volume safety guidelines (recommended if sharing device with children).",
+                    stringResource(R.string.audio_restore_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -101,7 +108,7 @@ fun AudioModsScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     onClick = { viewModel.restoreAudioDefaults() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Restore Stock Safety Limits")
+                    Text(stringResource(R.string.audio_restore_button))
                 }
             }
         }

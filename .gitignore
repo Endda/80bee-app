@@ -1,10 +1,12 @@
 *.class
 *.log
 
-# Android Studio / IntelliJ files
+# Android Studio / IntelliJ / VS Code files
 .idea/
+.vscode/
 *.iml
 .gradle/
+.kotlin/
 local.properties
 
 # Build outputs
@@ -20,14 +22,5 @@ adblib/build/
 *.keystore
 keystore.properties
 
-# Reference directories
-fastboot_ref/
-
-# Temporary key files
-keystore_base64.txt
-
 # Local documentation
 docs/
-
-# Build log files
-build_log.txt

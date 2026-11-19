@@ -17,11 +17,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.eightbee.app.BackgroundOperationService
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 
 @Composable
 internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -> Unit {
@@ -47,20 +51,22 @@ internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
-    val context = LocalContext.current
     val isMonitoring by BackgroundOperationService.isMonitoringBattery.collectAsState()
     val telemetryText by BackgroundOperationService.batteryTelemetry.collectAsState()
     val startMonitoringWithPermission = rememberNotificationPermissionLauncher {
-        viewModel.startBatteryMonitoring(context)
+        viewModel.startBatteryMonitoring()
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Battery Diagnostics") },
+                title = { Text(stringResource(R.string.battery_diag_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
                     }
                 }
             )
@@ -74,20 +80,19 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Description card
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Battery Health & Charging Simulation",
+                        text = stringResource(R.string.battery_diag_card_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Verifying battery levels, hardware temperature sensors, and charging states helps isolate app-drain behaviors. Simulating unplugged mode allows developers to capture battery stats during testing even while physically plugged into USB debugging.",
+                        text = stringResource(R.string.battery_diag_card_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -96,27 +101,34 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Service status control
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isMonitoring) "Monitoring Active" else "Monitoring Stopped",
+                    text = stringResource(
+                        if (isMonitoring) R.string.battery_diag_monitoring_active
+                        else R.string.battery_diag_monitoring_stopped
+                    ),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
                 Button(
                     onClick = {
                         if (isMonitoring) {
-                            viewModel.stopBatteryMonitoring(context)
+                            viewModel.stopBatteryMonitoring()
                         } else {
                             startMonitoringWithPermission()
                         }
                     }
                 ) {
-                    Text(if (isMonitoring) "Stop Scan" else "Start Scan")
+                    Text(
+                        stringResource(
+                            if (isMonitoring) R.string.battery_diag_stop_scan
+                            else R.string.battery_diag_start_scan
+                        )
+                    )
                 }
             }
 
@@ -128,7 +140,6 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Simulate Unplug controls
                 if (parsedData.isCharging) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -141,19 +152,19 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                         ) {
                             Icon(
                                 Icons.Filled.Warning,
-                                contentDescription = "Charging Warning",
+                                contentDescription = stringResource(R.string.battery_diag_cd_charging_warning),
                                 tint = MaterialTheme.colorScheme.onErrorContainer
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Device is Charging",
+                                    text = stringResource(R.string.battery_diag_charging_title),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
                                 Text(
-                                    text = "Simulate unplugging to capture diagnostic stats without charging contamination.",
+                                    text = stringResource(R.string.battery_diag_charging_desc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer
                                 )
@@ -168,24 +179,23 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilledTonalButton(
-                        onClick = { viewModel.executeCommand("dumpsys battery unplug") },
+                        onClick = { viewModel.simulateBatteryUnplug() },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Simulate Unplug")
+                        Text(stringResource(R.string.battery_diag_simulate_unplug))
                     }
                     Button(
-                        onClick = { viewModel.executeCommand("dumpsys battery reset") },
+                        onClick = { viewModel.resetBatterySimulation() },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Reset Charging")
+                        Text(stringResource(R.string.battery_diag_reset_charging))
                     }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Raw Dumpsys view
                 Text(
-                    text = "Raw Telemetry Console Log",
+                    text = stringResource(R.string.battery_diag_raw_console),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.Start)
@@ -198,17 +208,17 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 ) {
                     Text(
                         text = telemetryText,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
             } else {
                 Text(
-                    text = "Click 'Start Scan' to query battery parameters dynamically.",
+                    text = stringResource(R.string.battery_diag_empty_prompt),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.padding(vertical = 32.dp)
                 )
             }
@@ -223,17 +233,32 @@ fun BatteryMetricsView(data: BatteryMetrics) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Key Telemetry",
+                text = stringResource(R.string.battery_diag_key_telemetry),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            MetricRow("Level", "${data.level}%")
-            MetricRow("Health", data.healthString)
-            MetricRow("Temperature", "${data.temp}°C")
-            MetricRow("Voltage", "${data.voltage} V")
-            MetricRow("Power Source", if (data.isCharging) "Charging (AC/USB)" else "Battery (Discharging)")
+            MetricRow(
+                stringResource(R.string.battery_diag_metric_level),
+                stringResource(R.string.battery_diag_level_format, data.level)
+            )
+            MetricRow(stringResource(R.string.battery_diag_metric_health), data.healthString)
+            MetricRow(
+                stringResource(R.string.battery_diag_metric_temp),
+                stringResource(R.string.battery_diag_temp_format, data.temp.toString())
+            )
+            MetricRow(
+                stringResource(R.string.battery_diag_metric_voltage),
+                stringResource(R.string.battery_diag_voltage_format, data.voltage.toString())
+            )
+            MetricRow(
+                stringResource(R.string.battery_diag_metric_power),
+                stringResource(
+                    if (data.isCharging) R.string.battery_diag_power_charging
+                    else R.string.battery_diag_power_battery
+                )
+            )
         }
     }
 }

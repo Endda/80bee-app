@@ -1,5 +1,7 @@
 package com.cgutman.adblib;
 
+import android.util.Log;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -194,8 +196,8 @@ public class AdbConnection implements Closeable {
 					} catch (Exception e) {
 						/* The cleanup is taken care of by a combination of this thread
 						 * and close() */
-                        e.printStackTrace();
-                        break;
+						Log.w("AdbConnection", "Receive thread terminated", e);
+						break;
 					}
 				}
 

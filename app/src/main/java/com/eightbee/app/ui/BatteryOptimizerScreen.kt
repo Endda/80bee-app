@@ -10,11 +10,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.BackgroundOperationService
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,7 +23,6 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
     val optimizerState by viewModel.batteryOptimizerState.collectAsState()
     val activeConnection by viewModel.activeConnection.collectAsState()
-    val context = LocalContext.current
 
     LaunchedEffect(activeConnection) {
         viewModel.refreshBatteryOptimizerState()
@@ -31,16 +31,19 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val compileProgress by BackgroundOperationService.compileProgress.collectAsState()
     val isCompiling by BackgroundOperationService.isCompiling.collectAsState()
     val startCompileWithPermission = rememberNotificationPermissionLauncher {
-        viewModel.startArtCompilation(context)
+        viewModel.startArtCompilation()
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Battery Optimizer") },
+                title = { Text(stringResource(R.string.battery_opt_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
                     }
                 }
             )
@@ -53,20 +56,19 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Description card
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Advanced Battery Optimization",
+                        text = stringResource(R.string.battery_opt_card_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Configuring system Doze parameters, restricting background telemetry, and disabling high resource display parameters can double standby battery life.",
+                        text = stringResource(R.string.battery_opt_card_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -75,23 +77,31 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Standard Standby Controls", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.battery_opt_standby_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Control device idle triggers (Doze Mode).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                stringResource(R.string.battery_opt_standby_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { viewModel.executeCommand("dumpsys deviceidle force-idle") },
+                    onClick = { viewModel.setForceDoze(true) },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Force Doze Standby")
+                    Text(stringResource(R.string.battery_opt_force_doze))
                 }
                 FilledTonalButton(
-                    onClick = { viewModel.executeCommand("dumpsys deviceidle unforce") },
+                    onClick = { viewModel.setForceDoze(false) },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Disable Forced Doze")
+                    Text(stringResource(R.string.battery_opt_disable_doze))
                 }
             }
 
@@ -99,18 +109,18 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(
-                    onClick = { viewModel.executeCommand("settings put global adaptive_battery_management_enabled 1") },
+                    onClick = { viewModel.setAdaptiveBattery(true) },
                     modifier = Modifier.weight(1f),
                     enabled = !settings.adaptiveBatteryEnabled
                 ) {
-                    Text("Enable Adaptive Battery")
+                    Text(stringResource(R.string.battery_opt_enable_adaptive))
                 }
                 FilledTonalButton(
-                    onClick = { viewModel.executeCommand("settings put global adaptive_battery_management_enabled 0") },
+                    onClick = { viewModel.setAdaptiveBattery(false) },
                     modifier = Modifier.weight(1f),
                     enabled = settings.adaptiveBatteryEnabled
                 ) {
-                    Text("Disable Adaptive")
+                    Text(stringResource(R.string.battery_opt_disable_adaptive))
                 }
             }
 
@@ -118,13 +128,25 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Deep Standby Modifications", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.battery_opt_deep_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Maximum Hibernation Mode", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Restricts battery sync tasks, cuts idle wake lock intervals, and enforces background app deep sleep.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_max_hibernation_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_max_hibernation_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.maxHibernation,
@@ -138,8 +160,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Zero Maintenance Standby", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Stops battery status checks, telemetry synchronizations, and system logs while in standby.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_zero_maint_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_zero_maint_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.dozeZero,
@@ -153,8 +183,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Background Drain Monitor", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Traces periodic background task wakelocks and stops battery leaking.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_drain_monitor_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_drain_monitor_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.backgroundDrainMonitor,
@@ -168,8 +206,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Lock Refresh Rate at 60Hz", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Halves screen GPU refreshes to dramatically decrease active usage power consumption.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_lock_60hz_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_lock_60hz_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.lockRefreshRate60,
@@ -183,8 +229,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Disable Window Blurs", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Bypasses GPU blur calculations for system notification shades and folders.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_disable_blurs_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_disable_blurs_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.disableWindowBlurs,
@@ -198,8 +252,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Super Dim Matrix", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Applies a custom hardware color matrix to dim pixels below normal hardware bounds.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_super_dim_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_super_dim_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.superDim,
@@ -213,15 +275,31 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Samsung OEM Customizations", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.battery_opt_samsung_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Special features specifically optimized for Samsung One UI.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            Text(
+                stringResource(R.string.battery_opt_samsung_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary
+            )
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Disable CPU Responsiveness Booster", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Stops Samsung's booster thread which spikes CPU clock speeds during scroll actions.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_cpu_booster_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_cpu_booster_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.samsungCpuBoosterOff,
@@ -235,8 +313,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Disable RAM Plus virtual paging", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Disables secondary storage-based paging (zRAM swap) to save flash memory read/writes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_ram_plus_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_ram_plus_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.samsungRamPlusOff,
@@ -250,8 +336,16 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Disable Motion Engine", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Disables secondary OEM sensors and motion predictors that scan body orientations in the background.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        stringResource(R.string.battery_opt_motion_engine_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.battery_opt_motion_engine_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 Switch(
                     checked = optimizerState.samsungMotionEngineOff,
@@ -265,9 +359,17 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("ART Compilation (AOT Optimizer)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.battery_opt_art_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Forces Ahead-Of-Time (AOT) speed compilation. Compiling installed applications into speed mode translates Java/Kotlin bytecode directly to local assembly machine code. Saves active battery usage.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                stringResource(R.string.battery_opt_art_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
             if (isCompiling) {
@@ -287,14 +389,14 @@ fun BatteryOptimizerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     enabled = !isCompiling,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Start Compilation")
+                    Text(stringResource(R.string.battery_opt_start_compile))
                 }
                 FilledTonalButton(
-                    onClick = { viewModel.stopArtCompilation(context) },
+                    onClick = { viewModel.stopArtCompilation() },
                     enabled = isCompiling,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Cancel Optimizer")
+                    Text(stringResource(R.string.battery_opt_cancel_compile))
                 }
             }
         }
