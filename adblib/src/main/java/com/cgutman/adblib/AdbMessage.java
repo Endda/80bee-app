@@ -9,6 +9,9 @@ import java.nio.ByteOrder;
  * @author Cameron Gutman
  */
 public class AdbMessage {
+    /** Upper bound for ADB packet payloads (ADB v2 maxdata is 1 MiB). */
+    public static final int MAX_PAYLOAD_LENGTH = 1024 * 1024;
+
     private ByteBuffer mMessageBuffer;
 
     private byte[] payload;
@@ -49,10 +52,19 @@ public class AdbMessage {
 
         msg.mMessageBuffer = packet;
 
+        /* Verify header magic and payload bounds before allocating payload memory */
+        if (msg.getCommand() != (msg.getMagic() ^ 0xFFFFFFFF)) {
+            throw new IOException("Invalid ADB message header magic");
+        }
+        int payloadLength = msg.getPayloadLength();
+        if (payloadLength < 0 || payloadLength > MAX_PAYLOAD_LENGTH) {
+            throw new IOException("Invalid ADB payload length: " + payloadLength);
+        }
+
 		/* If there's a payload supplied, read that too */
-        if (msg.getPayloadLength() != 0) {
-            msg.setPayload(new byte[msg.getPayloadLength()]);
-            in.readx(msg.getPayload(), msg.getPayloadLength());
+        if (payloadLength != 0) {
+            msg.setPayload(new byte[payloadLength]);
+            in.readx(msg.getPayload(), payloadLength);
         }
 
         return msg;

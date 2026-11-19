@@ -201,6 +201,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshSettings() {
         val connection = _activeConnection.value ?: return
         if (!connection.isAvailable()) return
+        if (connection is OtgConnectionManager && connection.isFastboot()) return
 
         viewModelScope.launch {
             val dnsMode = connection.runShellCommand("settings get global private_dns_mode")
@@ -396,15 +397,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 list.add("com.android.networkstack")
             }
             when (oemOverride) {
-                "samsung" -> list.addAll(listOf("com.samsung.android.bluetooth", "com.sec.android.app.samsungapps"))
+                "samsung" -> list.add("com.samsung.android.bluetooth")
                 "xiaomi" -> list.addAll(listOf("com.miui.bluetooth", "com.xiaomi.bluetooth", "com.xiaomi.bluetooth.overlay"))
                 "oneplus" -> list.addAll(listOf("com.oplus.bluetooth", "com.coloros.bluetooth", "com.nearme.bluetooth"))
                 "motorola" -> list.addAll(listOf("com.motorola.bluetooth", "com.motorola.bt"))
             }
 
             for (pkg in list) {
-                _output.value = "Clearing data for $pkg..."
-                conn.runShellCommand("pm clear $pkg")
+                if (isAdvanced) {
+                    _output.value = "Clearing data for $pkg..."
+                    conn.runShellCommand("pm clear $pkg")
+                } else {
+                    _output.value = "Restarting $pkg..."
+                    conn.runShellCommand("am force-stop $pkg")
+                }
             }
 
             if (isAdvanced) {
@@ -934,18 +940,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _sideloadState = MutableStateFlow<SideloadState>(SideloadState.Idle)
     val sideloadState: StateFlow<SideloadState> = _sideloadState.asStateFlow()
 
-    // Archives are untrusted, so cap how much a single sideload can unpack.
+    // Archives and user-selected files are untrusted, so cap how much we copy to cache.
     private val maxSideloadApkEntries = 200
     private val maxSideloadBytes = 4L * 1024 * 1024 * 1024
+    private val maxBootImageBytes = 512L * 1024 * 1024
+    private val maxMagiskApkBytes = 256L * 1024 * 1024
 
-    private fun copyBounded(input: java.io.InputStream, output: java.io.OutputStream, budget: Long): Long {
+    private fun copyBounded(
+        input: java.io.InputStream,
+        output: java.io.OutputStream,
+        budget: Long,
+        overflowMessage: String = "Archive is too large to sideload."
+    ): Long {
         val buffer = ByteArray(64 * 1024)
         var copied = 0L
         while (true) {
             val read = input.read(buffer)
             if (read < 0) break
             copied += read
-            if (copied > budget) throw java.io.IOException("Archive is too large to sideload.")
+            if (copied > budget) throw java.io.IOException(overflowMessage)
             output.write(buffer, 0, read)
         }
         return copied
@@ -1160,11 +1173,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             
             config.apkFiles.forEach { it.delete() }
             
-            if (commitResult.contains("Success", ignoreCase = true) || commitResult.isBlank()) {
+            if (commitResult.contains("Success", ignoreCase = true)) {
                 completedSteps.add(InstallStep.COMMIT_INSTALL)
                 _sideloadState.value = SideloadState.Success(config.appLabel)
             } else {
-                _sideloadState.value = SideloadState.Error("Installation failed: $commitResult", InstallStep.COMMIT_INSTALL)
+                val detail = commitResult.ifBlank { "No response received from package manager." }
+                _sideloadState.value = SideloadState.Error("Installation failed: $detail", InstallStep.COMMIT_INSTALL)
             }
         }
     }
@@ -1379,7 +1393,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ?: throw IllegalStateException("Unable to open selected image file.")
                     inputStream.use { input ->
                         tempImg.outputStream().use { output ->
-                            input.copyTo(output)
+                            copyBounded(
+                                input = input,
+                                output = output,
+                                budget = maxBootImageBytes,
+                                overflowMessage = "Selected image exceeds the 512 MB boot image limit."
+                            )
                         }
                     }
                     MagiskPatcherHelper.validateBootImageForPartition(tempImg, deviceData?.targetPartition)
@@ -1454,7 +1473,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?: throw IllegalStateException("Unable to open selected Magisk APK.")
                 apkStream.use { input ->
                     tempApkFile.outputStream().use { output ->
-                        input.copyTo(output)
+                        copyBounded(
+                            input = input,
+                            output = output,
+                            budget = maxMagiskApkBytes,
+                            overflowMessage = "Selected Magisk APK exceeds the 256 MB limit."
+                        )
                     }
                 }
 
@@ -1586,18 +1610,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 addPatcherPatchLog("Pulling patched image to host...", "INFO")
                 _patcherState.update { it.copy(patchProgress = 0.85f, patchProgressLabel = "Pulling patched image...") }
                 val remotePatchedPath = "$workspace/new-boot.img"
-                
-                val pulledBytes = connection.pullFile(remotePatchedPath) { received ->
-                    _patcherState.update {
-                        it.copy(
-                            patchProgressLabel = "Pulling patched image (${String.format("%.1f MB", received.toFloat() / (1024 * 1024))})..."
-                        )
-                    }
-                }
-                
                 val patchedFile = File(context.cacheDir, "patched_boot_${System.currentTimeMillis()}.img")
                 try {
-                    patchedFile.writeBytes(pulledBytes)
+                    connection.pullFile(
+                        remotePath = remotePatchedPath,
+                        destination = patchedFile,
+                        maxBytes = maxBootImageBytes
+                    ) { received ->
+                        _patcherState.update {
+                            it.copy(
+                                patchProgressLabel = "Pulling patched image (${String.format("%.1f MB", received.toFloat() / (1024 * 1024))})..."
+                            )
+                        }
+                    }
                     MagiskPatcherHelper.validateBootImageForPartition(
                         patchedFile,
                         _patcherState.value.deviceData?.targetPartition

@@ -134,17 +134,22 @@ fun ConfigView(
     onInstall: (Boolean, Boolean, Boolean, Boolean, Boolean) -> Unit,
     onCancel: () -> Unit
 ) {
-    var targetSdk by remember { mutableStateOf(34) }
+    var targetSdk by remember(connectionManager) { mutableStateOf<Int?>(null) }
+    var bypassLowTargetSdk by remember(connectionManager) { mutableStateOf(false) }
     LaunchedEffect(connectionManager) {
         try {
             val sdkStr = connectionManager.runShellCommand("getprop ro.build.version.sdk").trim()
-            sdkStr.toIntOrNull()?.let { targetSdk = it }
-        } catch (e: Exception) {}
+            val parsedSdk = sdkStr.toIntOrNull()
+            targetSdk = parsedSdk ?: 0
+            bypassLowTargetSdk = (parsedSdk ?: 0) >= 34
+        } catch (e: Exception) {
+            targetSdk = 0
+            bypassLowTargetSdk = false
+        }
     }
 
-    val isTargetAndroid14OrHigher = targetSdk >= 34
+    val isTargetAndroid14OrHigher = (targetSdk ?: 0) >= 34
 
-    var bypassLowTargetSdk by remember { mutableStateOf(isTargetAndroid14OrHigher) }
     var grantAllPermissions by remember { mutableStateOf(false) }
     var allowDowngrade by remember { mutableStateOf(false) }
     var testOnly by remember { mutableStateOf(false) }
@@ -268,7 +273,11 @@ fun ConfigView(
         Column {
             Text("Bypass Low Target SDK Block", style = MaterialTheme.typography.bodyLarge)
             Text(
-                text = if (isTargetAndroid14OrHigher) "Forces installation of old legacy apps" else "Requires Android 14+ on target device",
+                text = when {
+                    targetSdk == null -> "Detecting target Android version..."
+                    isTargetAndroid14OrHigher -> "Forces installation of old legacy apps"
+                    else -> "Requires Android 14+ on target device"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -360,7 +369,13 @@ fun ConfigView(
         }
         Button(
             onClick = {
-                onInstall(bypassLowTargetSdk, grantAllPermissions, allowDowngrade, testOnly, installToSdCard)
+                onInstall(
+                    bypassLowTargetSdk && isTargetAndroid14OrHigher,
+                    grantAllPermissions,
+                    allowDowngrade,
+                    testOnly,
+                    installToSdCard
+                )
             },
             modifier = Modifier.weight(1f)
         ) {

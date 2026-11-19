@@ -35,6 +35,8 @@ object MagiskPatcherHelper {
     private val ANDROID_BOOT_MAGIC = "ANDROID!".toByteArray(StandardCharsets.US_ASCII)
     private const val BOOT_HEADER_PROBE_SIZE = 64
     private const val MAX_ANDROID_INFO_BYTES = 64 * 1024
+    private const val MAX_BOOT_IMAGE_BYTES = 512L * 1024 * 1024
+    private const val MAX_MAGISK_COMPONENT_BYTES = 128L * 1024 * 1024
     private val PIXEL_6_SERIES = setOf("oriole", "raven", "bluejay")
 
     fun resolveReconTarget(
@@ -274,14 +276,20 @@ object MagiskPatcherHelper {
         expectedSize: Long,
         onFraction: (Float) -> Unit
     ) {
+        if (expectedSize > MAX_BOOT_IMAGE_BYTES) {
+            throw java.io.IOException("Archive image entry exceeds the 512 MB limit.")
+        }
         try {
             outFile.outputStream().use { output ->
                 val buffer = ByteArray(256 * 1024)
                 var bytesRead: Int
                 var totalCopied = 0L
                 while (input.read(buffer).also { bytesRead = it } != -1) {
-                    output.write(buffer, 0, bytesRead)
                     totalCopied += bytesRead
+                    if (totalCopied > MAX_BOOT_IMAGE_BYTES) {
+                        throw java.io.IOException("Archive image entry exceeds the 512 MB limit.")
+                    }
+                    output.write(buffer, 0, bytesRead)
                     if (expectedSize > 0) {
                         onFraction((totalCopied.toFloat() / expectedSize).coerceIn(0f, 1f))
                     }
@@ -405,10 +413,23 @@ object MagiskPatcherHelper {
         zipFile.use { zip ->
             for ((zipPath, targetName) in targets) {
                 val entry = zip.getEntry(zipPath) ?: continue
+                if (entry.size > MAX_MAGISK_COMPONENT_BYTES) {
+                    throw java.io.IOException("Magisk component $targetName exceeds size limit.")
+                }
                 val outFile = File(cacheDir, targetName)
                 zip.getInputStream(entry).use { input ->
                     outFile.outputStream().use { output ->
-                        input.copyTo(output)
+                        val buffer = ByteArray(64 * 1024)
+                        var copied = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            copied += read
+                            if (copied > MAX_MAGISK_COMPONENT_BYTES) {
+                                throw java.io.IOException("Magisk component $targetName exceeds size limit.")
+                            }
+                            output.write(buffer, 0, read)
+                        }
                     }
                 }
                 extractedFiles[targetName] = outFile

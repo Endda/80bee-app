@@ -25,6 +25,12 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Grant Execute Permission to Gradlew
+        run: chmod +x gradlew
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest
+
       - name: Decode Keystore
         env:
           ENCODED_STRING: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -41,9 +47,6 @@ jobs:
           echo "keyPassword=$KEY_PASSWORD" >> keystore.properties
           echo "storeFile=release.keystore" >> keystore.properties
           echo "storePassword=$STORE_PASSWORD" >> keystore.properties
-
-      - name: Grant Execute Permission to Gradlew
-        run: chmod +x gradlew
 
       - name: Build Release APK and AAB
         run: ./gradlew :app:bundleRelease :app:assembleRelease

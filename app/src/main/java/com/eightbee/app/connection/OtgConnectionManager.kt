@@ -13,7 +13,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -149,7 +148,9 @@ class OtgConnectionManager(
         
         connectionJob = CoroutineScope(Dispatchers.IO).launch {
             var openedConnection: android.hardware.usb.UsbDeviceConnection? = null
-            var handedOff = false
+            var pendingAdb: AdbConnection? = null
+            var pendingFastboot: FastbootUsbClient? = null
+            var committed = false
             try {
                 val connection = usbManager.openDevice(device) ?: run {
                     Log.e(TAG, "Failed to open USB device connection")
@@ -170,35 +171,36 @@ class OtgConnectionManager(
                     }
                     
                     val channel = UsbChannel(connection, adbInterface)
-                    handedOff = true
                     val newAdbConnection = AdbConnection.create(channel, crypto)
+                    pendingAdb = newAdbConnection
                     newAdbConnection.connect()
                     
                     adbConnection = newAdbConnection
+                    committed = true
                     _isAvailableFlow.value = true
                     _connectionState.value = ConnectionState.AdbConnected
                     Log.d(TAG, "ADB Connection successful for ${device.deviceName}")
                 } else if (fastbootInterface != null) {
                     val client = FastbootUsbClient(fastbootInterface, connection)
-                    handedOff = true
+                    pendingFastboot = client
                     fastbootClient = client
+                    committed = true
                     _isAvailableFlow.value = true
                     _connectionState.value = ConnectionState.FastbootConnected
                     Log.d(TAG, "Fastboot Connection successful for ${device.deviceName}")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Connection failed for ${device.deviceName}", e)
-                if (!handedOff) {
-                    try {
-                        openedConnection?.close()
-                    } catch (_: Exception) {}
-                }
                 disconnect()
             } finally {
-                if (!handedOff) {
-                    try {
-                        openedConnection?.close()
-                    } catch (_: Exception) {}
+                if (!committed) {
+                    when {
+                        pendingAdb != null -> runCatching { pendingAdb.close() }
+                        pendingFastboot != null -> runCatching { pendingFastboot.close() }
+                        else -> runCatching { openedConnection?.close() }
+                    }
                 }
             }
         }
@@ -430,27 +432,40 @@ class OtgConnectionManager(
         }
     }
 
-    suspend fun pullFile(remotePath: String, onProgress: ((Long) -> Unit)? = null): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun pullFile(
+        remotePath: String,
+        destination: File,
+        maxBytes: Long = 512L * 1024 * 1024,
+        onProgress: ((Long) -> Unit)? = null
+    ) = withContext(Dispatchers.IO) {
         val connection = adbConnection ?: throw IllegalStateException("ADB not connected.")
         val quotedPath = quoteRemotePath(remotePath)
         val expectedSize = statRemoteSize(remotePath)
             ?: throw IOException("Unable to stat remote file before pull: $remotePath")
+        if (expectedSize <= 0L || expectedSize > maxBytes) {
+            throw IOException("Unexpected remote file size for $remotePath: $expectedSize bytes")
+        }
 
         var stream: AdbStream? = null
         try {
             stream = connection.open("exec:cat $quotedPath")
-            val byteBuffer = ByteArrayOutputStream()
             var received = 0L
-            readStreamFully(stream) { bytes ->
-                byteBuffer.write(bytes)
-                received += bytes.size
-                onProgress?.invoke(received)
+            destination.outputStream().buffered().use { out ->
+                readStreamFully(stream) { bytes ->
+                    received += bytes.size
+                    if (received > maxBytes) {
+                        throw IOException("Pulled file exceeded maximum allowed size ($maxBytes bytes)")
+                    }
+                    out.write(bytes)
+                    onProgress?.invoke(received)
+                }
             }
-            val result = byteBuffer.toByteArray()
-            if (result.size.toLong() != expectedSize) {
-                throw IOException("Pull size verification failed for $remotePath: expected $expectedSize bytes, got ${result.size}")
+            if (received != expectedSize) {
+                throw IOException("Pull size verification failed for $remotePath: expected $expectedSize bytes, got $received")
             }
-            result
+        } catch (e: Exception) {
+            destination.delete()
+            throw e
         } finally {
             try {
                 stream?.close()
