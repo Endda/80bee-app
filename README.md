@@ -33,18 +33,18 @@ I research, test, and implement the features on the 80bee.com website. . .then t
 
 ## 📐 Architecture & Libraries
 
-80bee is written in **Kotlin** with **Jetpack Compose** and leverages:
+80bee is written in **Kotlin** with **Jetpack Compose** (`minSdk 26` / Android 8.0+, `targetSdk 37` / Android 17, with themed monochrome launcher icon support) and leverages:
 *   **[Shizuku API](https://github.com/RikkaApps/Shizuku-API):** Communicates with the local Shizuku service to run privileged shell commands root-free.
 *   **[adblib](adblib/LICENSE):** Vendored Java ADB protocol implementation (based on `cgutman/AdbLib` with USB OTG channel extensions) for device-to-device ADB over USB Host.
 *   **Custom `FastbootUsbClient`:** Direct USB bulk-transfer Fastboot protocol client built on Android's USB Host API for bootloader inspection and flashing.
-*   **Android USB Host API:** Interacts with the USB controller directly for OTG ADB and Fastboot communication.
+*   **Android USB Host API:** Interacts with the USB controller directly for OTG ADB and Fastboot communication (`android.hardware.usb.host` is optional, so non-OTG devices can still run Local Mode).
 
 ---
 
 ## ⚙️ Prerequisites
 
 ### For Local Mode (Standalone)
-To run commands on your own device, you need the **Shizuku** app installed and running:
+To run commands on your own device (works even on devices without USB OTG Host hardware):
 1. Download **Shizuku** from Google Play, F-Droid, or GitHub.
 2. Open Shizuku and follow the setup instructions (utilizing **Wireless Debugging** in Android Developer Options).
 3. Start Shizuku, open **80bee**, and authorize it when prompted.
@@ -85,7 +85,7 @@ The output APK will be generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## 📄 License & Attributions
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** - see the [LICENSE](LICENSE) file for details. See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ### Third-Party Notices
 *   **[adblib](adblib/LICENSE):** Based on [cgutman/AdbLib](https://github.com/cgutman/AdbLib) (Copyright (c) 2013, Cameron Gutman, BSD 3-Clause License) with USB OTG channel extensions by xudong.
