@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.eightbee.app"
-    compileSdk = 36
+    compileSdk = 37
 
     val keystorePropertiesFile = rootProject.file("keystore.properties")
     val keystoreProperties = Properties()
@@ -31,9 +31,9 @@ android {
         // Keep "com.eightybee.app" distinct from namespace ("com.eightbee.app") to preserve the existing Play Store listing.
         applicationId = "com.eightybee.app"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        targetSdk = 37
+        versionCode = 5
+        versionName = "1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -75,11 +75,11 @@ kotlin {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.18.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0")
-    implementation("androidx.activity:activity-compose:1.12.3")
-    implementation("androidx.activity:activity-ktx:1.12.3")
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.1")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.activity:activity-ktx:1.13.0")
     implementation(platform("androidx.compose:compose-bom:2026.04.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")

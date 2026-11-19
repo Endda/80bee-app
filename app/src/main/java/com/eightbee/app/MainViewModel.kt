@@ -1,5 +1,6 @@
 package com.eightbee.app
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -147,7 +148,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        super.onCleared()
         shizukuManager.close()
         otgManager.close()
         val serviceConn = BackgroundOperationService.connectionManager
@@ -539,6 +539,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // /sdcard/Download/setup_ha.sh is pushed onto the remote ADB target, not read on the local host.
+    @SuppressLint("SdCardPath")
     fun deployHomeAssistant() {
         val app = getApplication<Application>()
         runExclusive("Checking Termux installation...", notifySnackbar = true) { conn ->
