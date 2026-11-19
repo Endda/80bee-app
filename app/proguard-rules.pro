@@ -5,9 +5,6 @@
 -keep class rikka.shizuku.** { *; }
 -keep class moe.shizuku.manager.** { *; }
 
-# Fastboot Java
--keep class io.github.rohitverma882.fastboot.** { *; }
-
 # Keep AIDL interfaces
 -keep interface * extends android.os.IInterface { *; }
 

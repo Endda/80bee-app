@@ -24,10 +24,13 @@ import com.eightbee.app.PackageDatabase
 import com.eightbee.app.PresetPkg
 import com.eightbee.app.connection.ShizukuConnectionManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.nio.charset.StandardCharsets
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,11 +58,21 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            val content = readUriText(context, it)
-            parseSnapshotAndCompare(viewModel, coroutineScope, content) { list, status ->
-                restoreList = list
-                snapshotFeedback = status
-                selectedTab = 3
+            coroutineScope.launch {
+                val contentResult = withContext(Dispatchers.IO) {
+                    runCatching { readUriTextBounded(context, it) }
+                }
+                contentResult.onSuccess { content ->
+                    parseSnapshotAndCompare(viewModel, coroutineScope, content) { list, status ->
+                        restoreList = list
+                        snapshotFeedback = status
+                        selectedTab = 3
+                    }
+                }.onFailure { err ->
+                    restoreList = emptyList()
+                    snapshotFeedback = "Failed to read snapshot: ${err.message ?: "Unable to open file"}"
+                    selectedTab = 3
+                }
             }
         }
     }
@@ -343,7 +356,6 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                                         val conn = viewModel.activeConnection.value
                                         if (conn != null) {
                                             coroutineScope.launch {
-                                                viewModel.executeCommand("pm list packages -d")
                                                 val disabledOut = conn.runShellCommand("pm list packages -d")
                                                 val disabled = disabledOut.split("\n")
                                                     .map { it.trim() }
@@ -595,7 +607,6 @@ fun PackageList(
 internal fun createSnapshot(context: Context, viewModel: MainViewModel, scope: CoroutineScope) {
     val conn = viewModel.activeConnection.value ?: return
     scope.launch {
-        viewModel.executeCommand("pm list packages")
         val packagesOut = conn.runShellCommand("pm list packages")
         val packages = packagesOut.split("\n")
             .map { it.trim() }
@@ -655,19 +666,24 @@ internal fun parseSnapshotAndCompare(
     }
 }
 
-internal fun readUriText(context: Context, uri: Uri): String {
-    val sb = java.lang.StringBuilder()
-    try {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            val reader = BufferedReader(InputStreamReader(stream))
-            var line: String? = reader.readLine()
-            while (line != null) {
-                sb.append(line).append("\n")
-                line = reader.readLine()
+private const val MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024
+
+internal fun readUriTextBounded(context: Context, uri: Uri, maxBytes: Int = MAX_SNAPSHOT_BYTES): String {
+    val stream = context.contentResolver.openInputStream(uri)
+        ?: throw IOException("Unable to open selected snapshot file.")
+    stream.use { input ->
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > maxBytes) {
+                throw IOException("Snapshot file exceeds the 5 MB limit.")
             }
+            out.write(buffer, 0, read)
         }
-    } catch (e: Exception) {
-        e.printStackTrace()
+        return out.toString(StandardCharsets.UTF_8.name())
     }
-    return sb.toString()
 }

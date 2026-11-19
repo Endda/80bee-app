@@ -52,7 +52,7 @@ fun BluetoothRepairScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Corrupted pairing caches, background service timeouts, or OEM-specific optimization policies frequently cause adapter lockups, pairing failures, and audio stutters. This utility resets Bluetooth cache parameters without deleting your paired items.",
+                        text = "Corrupted pairing caches, background service timeouts, or OEM-specific optimization policies frequently cause adapter lockups, pairing failures, and audio stutters. Standard Repair restarts Bluetooth services without wiping pairings; Advanced Repair clears Bluetooth app data and cycles radios.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

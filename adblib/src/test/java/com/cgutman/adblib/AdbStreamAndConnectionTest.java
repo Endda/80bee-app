@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.ConnectException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -153,6 +155,71 @@ public class AdbStreamAndConnectionTest {
         } finally {
             conn.close();
         }
+    }
+
+    @Test
+    public void parseAdbMessageRejectsCorruptMagicAndOversizedPayloadBeforeAllocation() throws Exception {
+        byte[] badMagicHeader = ByteBuffer.allocate(AdbProtocol.ADB_HEADER_LENGTH)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(0, AdbProtocol.CMD_WRTE)
+            .putInt(12, Integer.MAX_VALUE)
+            .putInt(20, 0x12345678)
+            .array();
+        try {
+            AdbMessage.parseAdbMessage(channelFromBytes(badMagicHeader));
+            fail("Expected IOException for corrupt ADB magic");
+        } catch (IOException expected) {
+            // Expected
+        }
+
+        byte[] negativeLengthHeader = ByteBuffer.allocate(AdbProtocol.ADB_HEADER_LENGTH)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(0, AdbProtocol.CMD_WRTE)
+            .putInt(12, -16)
+            .putInt(20, AdbProtocol.CMD_WRTE ^ 0xFFFFFFFF)
+            .array();
+        try {
+            AdbMessage.parseAdbMessage(channelFromBytes(negativeLengthHeader));
+            fail("Expected IOException for negative ADB payload length");
+        } catch (IOException expected) {
+            // Expected
+        }
+
+        byte[] oversizedLengthHeader = ByteBuffer.allocate(AdbProtocol.ADB_HEADER_LENGTH)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(0, AdbProtocol.CMD_WRTE)
+            .putInt(12, AdbMessage.MAX_PAYLOAD_LENGTH + 1)
+            .putInt(20, AdbProtocol.CMD_WRTE ^ 0xFFFFFFFF)
+            .array();
+        try {
+            AdbMessage.parseAdbMessage(channelFromBytes(oversizedLengthHeader));
+            fail("Expected IOException for oversized ADB payload length");
+        } catch (IOException expected) {
+            // Expected
+        }
+    }
+
+    private static AdbChannel channelFromBytes(final byte[] bytes) {
+        final ByteArrayInputStream in = new ByteArrayInputStream(bytes);
+        return new AdbChannel() {
+            @Override
+            public void readx(byte[] buffer, int length) throws IOException {
+                int offset = 0;
+                while (offset < length) {
+                    int n = in.read(buffer, offset, length - offset);
+                    if (n < 0) throw new IOException("EOF");
+                    offset += n;
+                }
+            }
+
+            @Override
+            public void writex(AdbMessage message) {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
     }
 
     private static void writePacket(PipedOutputStream out, AdbMessage msg) throws IOException {

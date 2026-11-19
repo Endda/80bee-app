@@ -181,9 +181,15 @@ class MainActivity : ComponentActivity() {
                 val intent = Intent(ACTION_USB_PERMISSION).apply {
                     setPackage(packageName)
                 }
+                // UsbManager populates EXTRA_DEVICE and EXTRA_PERMISSION_GRANTED via fillInIntent,
+                // which requires FLAG_MUTABLE on Android 12+; the explicit package keeps it safe on 14+.
+                val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
                 val permissionIntent = PendingIntent.getBroadcast(
-                    this, 0, intent,
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    this, 0, intent, pendingIntentFlags
                 )
                 usbManager.requestPermission(device, permissionIntent)
             }
