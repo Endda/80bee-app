@@ -1,8 +1,10 @@
 package com.eightbee.app.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,37 +14,59 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 import com.eightbee.app.Screen
 import com.eightbee.app.connection.OtgConnectionManager
 
-sealed class NavItem(val title: String, val icon: @Composable () -> Unit) {
-    object Home : NavItem("Home", { Icon(Icons.Filled.Home, contentDescription = "Home") })
-    object Advanced : NavItem("Advanced", { Icon(Icons.Filled.Build, contentDescription = "Advanced") })
-    object About : NavItem("About", { Icon(Icons.Filled.Settings, contentDescription = "About") })
+sealed class NavItem(@param:StringRes val titleRes: Int, val icon: ImageVector) {
+    object Home : NavItem(R.string.nav_home, Icons.Filled.Home)
+    object Advanced : NavItem(R.string.nav_advanced, Icons.Filled.Build)
+    object About : NavItem(R.string.nav_about, Icons.Filled.Settings)
 }
 
 @Composable
 fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
-    var selectedItem by remember { mutableStateOf(0) }
+    var selectedItem by rememberSaveable { mutableIntStateOf(0) }
     val items = listOf(NavItem.Home, NavItem.Advanced, NavItem.About)
     val currentScreen by viewModel.currentScreen.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(viewModel) {
+        viewModel.snackbarEvents.collect { message ->
+            if (viewModel.currentScreen.value != Screen.Dashboard) {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(
+                    message = message,
+                    duration = SnackbarDuration.Short
+                )
+            }
+        }
+    }
 
     // Handle physical back button presses in SPA model
-    androidx.activity.compose.BackHandler(enabled = currentScreen != Screen.Dashboard) {
+    BackHandler(enabled = currentScreen != Screen.Dashboard) {
         viewModel.navigateBack()
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
             if (currentScreen == Screen.Dashboard) {
                 NavigationBar {
                     items.forEachIndexed { index, item ->
+                        val label = stringResource(item.titleRes)
                         NavigationBarItem(
-                            icon = item.icon,
-                            label = { Text(item.title) },
+                            icon = { Icon(item.icon, contentDescription = label) },
+                            label = { Text(label) },
                             selected = selectedItem == index,
                             onClick = { selectedItem = index }
                         )
@@ -51,7 +75,11 @@ fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
             }
         }
     ) { paddingValues ->
-        Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize().padding(paddingValues)) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
             if (currentScreen == Screen.Dashboard) {
                 when (selectedItem) {
                     0 -> HomeTab(viewModel, onDisconnect)
@@ -85,57 +113,56 @@ fun HomeTab(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 @Composable
 fun AdvancedTab(viewModel: MainViewModel) {
     val connectionManager = viewModel.activeConnection.collectAsState().value ?: return
-    val context = androidx.compose.ui.platform.LocalContext.current
     var showSideloadSheet by remember { mutableStateOf(false) }
 
     Column(
-        modifier = androidx.compose.ui.Modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Advanced Features", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
-        
+        Text(stringResource(R.string.advanced_features_title), style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(16.dp))
+
         AdvancedAppLauncherCard(
-            title = "App Management",
-            description = "Sideload APK installation files or use the advanced package debloater system.",
+            title = stringResource(R.string.card_app_management_title),
+            description = stringResource(R.string.card_app_management_desc),
             onOpenDebloater = { viewModel.navigateTo(Screen.Debloater) },
             onApkPicked = { uri ->
-                viewModel.startSideload(context, uri)
+                viewModel.startSideload(uri)
                 showSideloadSheet = true
             }
         )
-        
-        Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
-        
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         AdvancedLauncherCard(
-            title = "Battery Optimizer",
-            description = "Access Doze standby configurations, Samsung-specific hardware overrides, and the AOT app compiler.",
+            title = stringResource(R.string.card_battery_optimizer_title),
+            description = stringResource(R.string.card_battery_optimizer_desc),
             onClick = { viewModel.navigateTo(Screen.BatteryOptimizer) }
         )
-        
-        Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
-        
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         AdvancedLauncherCard(
-            title = "Battery Diagnostics",
-            description = "Track battery metrics dynamically, log dumpsys parameters, and simulate charging disconnects.",
+            title = stringResource(R.string.card_battery_diagnostics_title),
+            description = stringResource(R.string.card_battery_diagnostics_desc),
             onClick = { viewModel.navigateTo(Screen.BatteryDiagnostic) }
         )
-        
-        Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
-        
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         AdvancedLauncherCard(
-            title = "Home Assistant Installer",
-            description = "Setup a background Home Assistant server on Android. Runs Termux scripting environments.",
+            title = stringResource(R.string.card_ha_installer_title),
+            description = stringResource(R.string.card_ha_installer_desc),
             onClick = { viewModel.navigateTo(Screen.HaInstaller) }
         )
 
         if (connectionManager is OtgConnectionManager) {
-            Spacer(modifier = androidx.compose.ui.Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             AdvancedLauncherCard(
-                title = "Bootloader Utilities",
-                description = "Unlock or lock the hardware bootloader parameters. Triggers hard data wipes.",
+                title = stringResource(R.string.card_bootloader_utilities_title),
+                description = stringResource(R.string.card_bootloader_utilities_desc),
                 onClick = { viewModel.navigateTo(Screen.BootloaderUtilities) }
             )
         }
@@ -158,12 +185,12 @@ fun AdvancedLauncherCard(
     onClick: () -> Unit
 ) {
     ElevatedCard(
-        modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         onClick = onClick
     ) {
-        Column(modifier = androidx.compose.ui.Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = androidx.compose.ui.Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
@@ -173,7 +200,6 @@ fun AdvancedLauncherCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdvancedAppLauncherCard(
     title: String,
@@ -187,25 +213,25 @@ fun AdvancedAppLauncherCard(
         uri?.let { onApkPicked(it) }
     }
 
-    ElevatedCard(modifier = androidx.compose.ui.Modifier.fillMaxWidth()) {
-        Column(modifier = androidx.compose.ui.Modifier.padding(16.dp)) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = androidx.compose.ui.Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = androidx.compose.ui.Modifier.height(12.dp))
-            Row(modifier = androidx.compose.ui.Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onOpenDebloater, modifier = androidx.compose.ui.Modifier.weight(1f)) {
-                    Text("Debloater")
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onOpenDebloater, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.action_debloater))
                 }
                 FilledTonalButton(
                     onClick = { filePickerLauncher.launch("*/*") },
-                    modifier = androidx.compose.ui.Modifier.weight(1f)
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text("Sideload APK")
+                    Text(stringResource(R.string.action_sideload_apk))
                 }
             }
         }
@@ -214,7 +240,7 @@ fun AdvancedAppLauncherCard(
 
 @Composable
 fun AboutTab() {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val versionName = remember(context) {
         try {
             @Suppress("DEPRECATION")
@@ -224,13 +250,15 @@ fun AboutTab() {
         }
     }
     Column(
-        modifier = androidx.compose.ui.Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("80bee", style = MaterialTheme.typography.displayMedium)
-        Text("Version $versionName", style = MaterialTheme.typography.bodyLarge)
-        Spacer(modifier = androidx.compose.ui.Modifier.height(32.dp))
-        Text("Built with Material Design 3", style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displayMedium)
+        Text(stringResource(R.string.about_version_format, versionName), style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(32.dp))
+        Text(stringResource(R.string.about_tagline), style = MaterialTheme.typography.bodySmall)
     }
 }

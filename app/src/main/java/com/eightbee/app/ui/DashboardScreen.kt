@@ -9,9 +9,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 import com.eightbee.app.Screen
 import com.eightbee.app.connection.OtgConnectionManager
 
@@ -33,16 +36,19 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Dashboard",
+                text = stringResource(R.string.dashboard_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
             Row {
                 IconButton(onClick = { viewModel.refreshSettings() }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh Status")
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = stringResource(R.string.cd_refresh_status)
+                    )
                 }
                 TextButton(onClick = onDisconnect) {
-                    Text("Disconnect")
+                    Text(stringResource(R.string.action_disconnect))
                 }
             }
         }
@@ -63,7 +69,7 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
                 Text(
                     text = outputText,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -73,8 +79,8 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 
         if (activeConnection is OtgConnectionManager) {
             HomeLauncherCard(
-                title = "Pixel Magisk Patcher",
-                description = "Guided, client-side rooting orchestrator. Decompress, patch boot partition kernels, and flash over USB Fastboot.",
+                title = stringResource(R.string.card_magisk_patcher_title),
+                description = stringResource(R.string.card_magisk_patcher_desc),
                 onClick = { viewModel.startPatcher() }
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -82,40 +88,40 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 
         // Home Tab Cards (Launchers)
         HomeLauncherCard(
-            title = "Boot Manager",
-            description = "Quick access reboot options including Recovery, Bootloader (Fastboot), and Fastbootd modes.",
+            title = stringResource(R.string.card_boot_manager_title),
+            description = stringResource(R.string.card_boot_manager_desc),
             onClick = { viewModel.navigateTo(Screen.BootManager) }
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
 
         HomeLauncherCard(
-            title = "UI Adjustments",
-            description = "Optimize window rendering latency, transitions duration scales, and global DPI densities.",
+            title = stringResource(R.string.card_ui_adjustments_title),
+            description = stringResource(R.string.card_ui_adjustments_desc),
             onClick = { viewModel.navigateTo(Screen.UiAdjustments) }
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
 
         HomeLauncherCard(
-            title = "DNS Manager",
-            description = "Enforce network-level tracker protection, cloudflare encryption, and ad-blocking preset resolvers.",
+            title = stringResource(R.string.card_dns_manager_title),
+            description = stringResource(R.string.card_dns_manager_desc),
             onClick = { viewModel.navigateTo(Screen.DnsToggle) }
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
 
         HomeLauncherCard(
-            title = "Audio Modifications",
-            description = "Override safe volume constraints and Calculated Sound Dose volume attenuation indices.",
+            title = stringResource(R.string.card_audio_mods_title),
+            description = stringResource(R.string.card_audio_mods_desc),
             onClick = { viewModel.navigateTo(Screen.AudioMods) }
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
 
         HomeLauncherCard(
-            title = "Bluetooth Repair",
-            description = "Reset pairing channels, clear cache corruption registers, and apply OEM fixes.",
+            title = stringResource(R.string.card_bluetooth_repair_title),
+            description = stringResource(R.string.card_bluetooth_repair_desc),
             onClick = { viewModel.navigateTo(Screen.BluetoothRepair) }
         )
     }

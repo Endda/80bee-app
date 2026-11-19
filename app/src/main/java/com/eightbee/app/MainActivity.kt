@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import com.eightbee.app.ui.DeviceDetectionScreen
 import com.eightbee.app.ui.MainScaffold
 import com.eightbee.app.ui.BootloaderWizardBottomSheet
+import com.eightbee.app.ui.PixelMagiskPatcherScreen
 import com.eightbee.app.ui.theme.EightBeeAppTheme
 
 class MainActivity : ComponentActivity() {
@@ -42,18 +43,16 @@ class MainActivity : ComponentActivity() {
 
             when (intent.action) {
                 ACTION_USB_PERMISSION -> {
-                    synchronized(this) {
-                        if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                            device?.let {
-                                val attached = viewModel.otgManager.setDevice(it)
-                                if (attached && viewModel.activeConnection.value is OtgConnectionManager) {
-                                    viewModel.refreshSettings()
-                                }
-                                if (viewModel.activeConnection.value !== viewModel.otgManager &&
-                                    (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle || viewModel.patcherState.value.isActive)
-                                ) {
-                                    viewModel.setActiveConnection(viewModel.otgManager)
-                                }
+                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                        device?.let {
+                            val attached = viewModel.otgManager.setDevice(it)
+                            if (attached && viewModel.activeConnection.value is OtgConnectionManager) {
+                                viewModel.refreshSettings()
+                            }
+                            if (viewModel.activeConnection.value !== viewModel.otgManager &&
+                                (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle || viewModel.patcherState.value.isActive)
+                            ) {
+                                viewModel.setActiveConnection(viewModel.otgManager)
                             }
                         }
                     }
@@ -94,7 +93,7 @@ class MainActivity : ComponentActivity() {
 
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (patcherState.isActive) {
-                            com.eightbee.app.ui.PixelMagiskPatcherScreen(
+                            PixelMagiskPatcherScreen(
                                 viewModel = viewModel,
                                 onDismiss = {
                                     viewModel.clearPatcherState()

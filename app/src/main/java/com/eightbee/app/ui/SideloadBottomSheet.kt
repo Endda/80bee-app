@@ -1,7 +1,6 @@
 package com.eightbee.app.ui
 
-import android.graphics.Bitmap
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,16 +15,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.InstallStep
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 import com.eightbee.app.SideloadState
 import com.eightbee.app.connection.ConnectionManager
+import com.eightbee.app.ui.theme.SuccessGreen
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,10 +39,12 @@ fun SideloadBottomSheet(
     onDismiss: () -> Unit
 ) {
     val sideloadState by viewModel.sideloadState.collectAsState()
-    
+
     ModalBottomSheet(
         onDismissRequest = {
-            if (sideloadState !is SideloadState.Installing) {
+            if (sideloadState !is SideloadState.Installing &&
+                sideloadState !is SideloadState.CopyingAndParsing
+            ) {
                 viewModel.clearSideloadState()
                 onDismiss()
             }
@@ -55,7 +61,7 @@ fun SideloadBottomSheet(
         ) {
             when (val state = sideloadState) {
                 is SideloadState.Idle -> {
-                    Text("Select a file to begin", style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.sideload_idle_prompt), style = MaterialTheme.typography.bodyLarge)
                 }
                 is SideloadState.CopyingAndParsing -> {
                     ParsingView()
@@ -113,12 +119,12 @@ fun ParsingView() {
     CircularProgressIndicator(modifier = Modifier.size(48.dp))
     Spacer(modifier = Modifier.height(16.dp))
     Text(
-        text = "Preparing Installer...",
+        text = stringResource(R.string.sideload_preparing_title),
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.SemiBold
     )
     Text(
-        text = "Extracting and parsing package information",
+        text = stringResource(R.string.sideload_preparing_desc),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -142,7 +148,7 @@ fun ConfigView(
             val parsedSdk = sdkStr.toIntOrNull()
             targetSdk = parsedSdk ?: 0
             bypassLowTargetSdk = (parsedSdk ?: 0) >= 34
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             targetSdk = 0
             bypassLowTargetSdk = false
         }
@@ -156,7 +162,6 @@ fun ConfigView(
     var installToSdCard by remember { mutableStateOf(false) }
     var advancedExpanded by remember { mutableStateOf(false) }
 
-    // Header: App Info
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -166,7 +171,7 @@ fun ConfigView(
         if (config.appIcon != null) {
             Image(
                 bitmap = config.appIcon.asImageBitmap(),
-                contentDescription = "App Icon",
+                contentDescription = stringResource(R.string.sideload_cd_app_icon),
                 modifier = Modifier
                     .size(64.dp)
                     .clip(RoundedCornerShape(12.dp)),
@@ -180,8 +185,8 @@ fun ConfigView(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Filled.Build, 
-                        contentDescription = "App Icon Placeholder",
+                        Icons.Filled.Build,
+                        contentDescription = stringResource(R.string.sideload_cd_app_icon_placeholder),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
@@ -205,7 +210,7 @@ fun ConfigView(
             ) {
                 SuggestionChip(
                     onClick = {},
-                    label = { Text("v${config.versionName}") }
+                    label = { Text(stringResource(R.string.sideload_version_format, config.versionName)) }
                 )
                 SuggestionChip(
                     onClick = {},
@@ -218,10 +223,11 @@ fun ConfigView(
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     Spacer(modifier = Modifier.height(16.dp))
 
-    // Archive/splits indicator
     if (config.isArchive) {
         Surface(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
             color = MaterialTheme.colorScheme.secondaryContainer,
             shape = RoundedCornerShape(8.dp)
         ) {
@@ -230,13 +236,17 @@ fun ConfigView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    Icons.AutoMirrored.Filled.List, 
-                    contentDescription = "Archive Info",
+                    Icons.AutoMirrored.Filled.List,
+                    contentDescription = stringResource(R.string.sideload_cd_archive_info),
                     tint = MaterialTheme.colorScheme.onSecondaryContainer
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "Split APK Bundle (${config.apkFiles.size} splits detected)",
+                    text = pluralStringResource(
+                        R.plurals.sideload_split_bundle,
+                        config.apkFiles.size,
+                        config.apkFiles.size
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                     fontWeight = FontWeight.Medium
@@ -245,23 +255,28 @@ fun ConfigView(
         }
     }
 
-    // Core Options
-    // Replace Existing (-r) - always active
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(checked = true, onCheckedChange = null, enabled = false)
         Spacer(modifier = Modifier.width(8.dp))
         Column {
-            Text("Replace existing application (-r)", style = MaterialTheme.typography.bodyLarge)
-            Text("Updates the app while preserving user data (recommended)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.sideload_opt_replace_title), style = MaterialTheme.typography.bodyLarge)
+            Text(
+                stringResource(R.string.sideload_opt_replace_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
-    // Bypass Low SDK
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(
@@ -271,44 +286,50 @@ fun ConfigView(
         )
         Spacer(modifier = Modifier.width(8.dp))
         Column {
-            Text("Bypass Low Target SDK Block", style = MaterialTheme.typography.bodyLarge)
+            Text(stringResource(R.string.sideload_opt_bypass_sdk_title), style = MaterialTheme.typography.bodyLarge)
             Text(
-                text = when {
-                    targetSdk == null -> "Detecting target Android version..."
-                    isTargetAndroid14OrHigher -> "Forces installation of old legacy apps"
-                    else -> "Requires Android 14+ on target device"
-                },
+                text = stringResource(
+                    when {
+                        targetSdk == null -> R.string.sideload_opt_bypass_sdk_detecting
+                        isTargetAndroid14OrHigher -> R.string.sideload_opt_bypass_sdk_supported
+                        else -> R.string.sideload_opt_bypass_sdk_unsupported
+                    }
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 
-    // Grant All Permissions
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(checked = grantAllPermissions, onCheckedChange = { grantAllPermissions = it })
         Spacer(modifier = Modifier.width(8.dp))
         Column {
-            Text("Grant all permissions (-g)", style = MaterialTheme.typography.bodyLarge)
-            Text("Automatically grant all runtime permissions declared in manifest", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.sideload_opt_grant_title), style = MaterialTheme.typography.bodyLarge)
+            Text(
+                stringResource(R.string.sideload_opt_grant_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
-    // Advanced Options Dropdown Toggle
     Spacer(modifier = Modifier.height(8.dp))
     TextButton(
         onClick = { advancedExpanded = !advancedExpanded },
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Advanced Options")
+            Text(stringResource(R.string.sideload_advanced_options))
             Spacer(modifier = Modifier.width(4.dp))
             Icon(
                 imageVector = Icons.Filled.ArrowDropDown,
-                contentDescription = "Expand Advanced Options",
+                contentDescription = stringResource(R.string.sideload_cd_expand_advanced),
                 modifier = Modifier.rotate(if (advancedExpanded) 180f else 0f)
             )
         }
@@ -316,42 +337,57 @@ fun ConfigView(
 
     AnimatedVisibility(visible = advancedExpanded) {
         Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp)) {
-            // Allow Downgrade
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(checked = allowDowngrade, onCheckedChange = { allowDowngrade = it })
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text("Allow downgrade (-d)", style = MaterialTheme.typography.bodyLarge)
-                    Text("Allows installing an older version over a newer version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.sideload_opt_downgrade_title), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        stringResource(R.string.sideload_opt_downgrade_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            // Test Only
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(checked = testOnly, onCheckedChange = { testOnly = it })
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text("Allow test packages (-t)", style = MaterialTheme.typography.bodyLarge)
-                    Text("Allows installing packages marked as testOnly", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.sideload_opt_test_title), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        stringResource(R.string.sideload_opt_test_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            // SD Card
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(checked = installToSdCard, onCheckedChange = { installToSdCard = it })
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text("Install to SD Card (-s)", style = MaterialTheme.typography.bodyLarge)
-                    Text("Forces the package to install on external storage", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.sideload_opt_sdcard_title), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        stringResource(R.string.sideload_opt_sdcard_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -359,13 +395,12 @@ fun ConfigView(
 
     Spacer(modifier = Modifier.height(24.dp))
 
-    // Action buttons
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-            Text("Cancel")
+            Text(stringResource(R.string.action_cancel))
         }
         Button(
             onClick = {
@@ -379,7 +414,7 @@ fun ConfigView(
             },
             modifier = Modifier.weight(1f)
         ) {
-            Text("Install")
+            Text(stringResource(R.string.sideload_install_button))
         }
     }
 }
@@ -388,7 +423,7 @@ fun ConfigView(
 fun InstallingView(state: SideloadState.Installing) {
     Spacer(modifier = Modifier.height(16.dp))
     Text(
-        text = "Installing App...",
+        text = stringResource(R.string.sideload_installing_title),
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.fillMaxWidth(),
@@ -399,7 +434,7 @@ fun InstallingView(state: SideloadState.Installing) {
     InstallStep.entries.forEach { step ->
         val isCompleted = state.completedSteps.contains(step)
         val isCurrent = state.currentStep == step
-        
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -413,8 +448,8 @@ fun InstallingView(state: SideloadState.Installing) {
                 if (isCompleted) {
                     Icon(
                         imageVector = Icons.Filled.CheckCircle,
-                        contentDescription = "Step Completed",
-                        tint = Color(0xFF4CAF50)
+                        contentDescription = stringResource(R.string.sideload_cd_step_completed),
+                        tint = SuccessGreen
                     )
                 } else if (isCurrent) {
                     CircularProgressIndicator(
@@ -424,7 +459,7 @@ fun InstallingView(state: SideloadState.Installing) {
                 } else {
                     Icon(
                         imageVector = Icons.Filled.Info,
-                        contentDescription = "Step Pending",
+                        contentDescription = stringResource(R.string.sideload_cd_step_pending),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
                     )
                 }
@@ -432,7 +467,7 @@ fun InstallingView(state: SideloadState.Installing) {
             Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text(
-                    text = step.getDisplayName(),
+                    text = stringResource(step.labelResId()),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (isCurrent) MaterialTheme.colorScheme.primary else if (isCompleted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
@@ -455,18 +490,18 @@ fun SuccessView(appLabel: String, onDismiss: () -> Unit) {
     Spacer(modifier = Modifier.height(16.dp))
     Icon(
         imageVector = Icons.Filled.CheckCircle,
-        contentDescription = "Success",
-        tint = Color(0xFF4CAF50),
+        contentDescription = stringResource(R.string.cd_success),
+        tint = SuccessGreen,
         modifier = Modifier.size(64.dp)
     )
     Spacer(modifier = Modifier.height(16.dp))
     Text(
-        text = "Installation Completed!",
+        text = stringResource(R.string.sideload_success_title),
         style = MaterialTheme.typography.titleLarge,
         fontWeight = FontWeight.Bold
     )
     Text(
-        text = "Successfully sideloaded $appLabel.",
+        text = stringResource(R.string.sideload_success_desc_format, appLabel),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
@@ -477,7 +512,7 @@ fun SuccessView(appLabel: String, onDismiss: () -> Unit) {
         onClick = onDismiss,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Done")
+        Text(stringResource(R.string.action_done))
     }
 }
 
@@ -486,24 +521,24 @@ fun ErrorView(message: String, step: InstallStep, onDismiss: () -> Unit) {
     Spacer(modifier = Modifier.height(16.dp))
     Icon(
         imageVector = Icons.Filled.Warning,
-        contentDescription = "Error",
+        contentDescription = stringResource(R.string.cd_error),
         tint = MaterialTheme.colorScheme.error,
         modifier = Modifier.size(64.dp)
     )
     Spacer(modifier = Modifier.height(16.dp))
     Text(
-        text = "Installation Failed",
+        text = stringResource(R.string.sideload_failed_title),
         style = MaterialTheme.typography.titleLarge,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.error
     )
     Text(
-        text = "Error occurred during step: ${step.getDisplayName()}",
+        text = stringResource(R.string.sideload_failed_step_format, stringResource(step.labelResId())),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp)
     )
-    
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -516,7 +551,7 @@ fun ErrorView(message: String, step: InstallStep, onDismiss: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier.padding(12.dp),
-            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            fontFamily = FontFamily.Monospace
         )
     }
 
@@ -527,23 +562,23 @@ fun ErrorView(message: String, step: InstallStep, onDismiss: () -> Unit) {
         horizontalAlignment = Alignment.Start
     ) {
         Text(
-            text = "Troubleshooting Tips:",
+            text = stringResource(R.string.sideload_tips_header),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(8.dp))
-        BulletItem("Verify the USB OTG connection if using OTG Host Mode.")
-        BulletItem("Ensure Shizuku is running and authorized if using Local Mode.")
-        BulletItem("Check if 'Allow version downgrade' is needed (if replacing with an older version).")
-        BulletItem("If the target app requires Test Only mode, enable 'Allow test packages'.")
-        BulletItem("Verify the APK file itself is not corrupted or incompatible with the target CPU architecture.")
+        BulletItem(stringResource(R.string.sideload_tip_1))
+        BulletItem(stringResource(R.string.sideload_tip_2))
+        BulletItem(stringResource(R.string.sideload_tip_3))
+        BulletItem(stringResource(R.string.sideload_tip_4))
+        BulletItem(stringResource(R.string.sideload_tip_5))
     }
 
     Button(
         onClick = onDismiss,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Close")
+        Text(stringResource(R.string.action_close))
     }
 }
 
@@ -565,8 +600,8 @@ fun formatSize(bytes: Long): String {
     val kb = bytes / 1024.0
     val mb = kb / 1024.0
     return if (mb >= 1.0) {
-        String.format("%.2f MB", mb)
+        String.format(Locale.US, "%.2f MB", mb)
     } else {
-        String.format("%.2f KB", kb)
+        String.format(Locale.US, "%.2f KB", kb)
     }
 }

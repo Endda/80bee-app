@@ -9,9 +9,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,10 +24,13 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Private DNS Manager") },
+                title = { Text(stringResource(R.string.dns_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
                     }
                 }
             )
@@ -38,20 +43,19 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Description card
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Secure DNS (Private DNS)",
+                        text = stringResource(R.string.dns_card_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Encrypted DNS requests prevent your ISP and third parties from tracking what websites you visit. Toggling secure resolvers block ads, phishing trackers, and improve networking speeds.",
+                        text = stringResource(R.string.dns_card_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -60,20 +64,27 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Current DNS Mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.dns_current_mode_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            val currentModeLabel = when(settings.privateDnsMode) {
-                "off" -> "Disabled (Using network defaults)"
-                "opportunistic" -> "Automatic (Opportunistic TLS encryption)"
-                "hostname" -> "Custom Hostname (${settings.privateDnsHostname})"
-                else -> "Unknown State"
+            val currentModeLabel = when (settings.privateDnsMode) {
+                "off" -> stringResource(R.string.dns_mode_off)
+                "opportunistic" -> stringResource(R.string.dns_mode_auto)
+                "hostname" -> stringResource(R.string.dns_mode_hostname_format, settings.privateDnsHostname)
+                else -> stringResource(R.string.dns_mode_unknown)
             }
             Text(currentModeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Presets
-            Text("Presets Configuration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.dns_presets_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(
@@ -81,18 +92,18 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { viewModel.executeCommand("settings put global private_dns_mode off") },
+                    onClick = { viewModel.setPrivateDnsOff() },
                     modifier = Modifier.weight(1f),
                     enabled = settings.privateDnsMode != "off"
                 ) {
-                    Text("Turn Off")
+                    Text(stringResource(R.string.dns_turn_off))
                 }
                 Button(
-                    onClick = { viewModel.executeCommand("settings put global private_dns_mode opportunistic") },
+                    onClick = { viewModel.setPrivateDnsAuto() },
                     modifier = Modifier.weight(1f),
                     enabled = settings.privateDnsMode != "opportunistic"
                 ) {
-                    Text("Auto Mode")
+                    Text(stringResource(R.string.dns_auto_mode))
                 }
             }
 
@@ -103,22 +114,18 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilledTonalButton(
-                    onClick = {
-                        viewModel.executeCommand("settings put global private_dns_mode hostname; settings put global private_dns_specifier dns.adguard.com")
-                    },
+                    onClick = { viewModel.setPrivateDnsHostname("dns.adguard.com") },
                     modifier = Modifier.weight(1f),
                     enabled = settings.privateDnsHostname != "dns.adguard.com" || settings.privateDnsMode != "hostname"
                 ) {
-                    Text("AdGuard (Blocks Ads)")
+                    Text(stringResource(R.string.dns_adguard))
                 }
                 FilledTonalButton(
-                    onClick = {
-                        viewModel.executeCommand("settings put global private_dns_mode hostname; settings put global private_dns_specifier 1dot1dot1dot1.cloudflare-dns.com")
-                    },
+                    onClick = { viewModel.setPrivateDnsHostname("1dot1dot1dot1.cloudflare-dns.com") },
                     modifier = Modifier.weight(1f),
                     enabled = settings.privateDnsHostname != "1dot1dot1dot1.cloudflare-dns.com" || settings.privateDnsMode != "hostname"
                 ) {
-                    Text("Cloudflare DNS")
+                    Text(stringResource(R.string.dns_cloudflare))
                 }
             }
 
@@ -126,37 +133,35 @@ fun DnsToggleScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Custom Private DNS Host", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.dns_custom_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Supply any TLS-capable DNS provider URL endpoint (DoT hostname).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                stringResource(R.string.dns_custom_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = customDnsHost,
                 onValueChange = { customDnsHost = it },
-                label = { Text("Private DNS Hostname (e.g. dns.quad9.net)") },
+                label = { Text(stringResource(R.string.dns_custom_label)) },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            // The hostname goes into a shell command, so only plain DNS names are allowed.
-            val hostIsValid = PRIVATE_DNS_HOST_REGEX.matches(customDnsHost.trim())
+            val hostIsValid = MainViewModel.isValidPrivateDnsHost(customDnsHost)
             Button(
-                onClick = {
-                    val host = customDnsHost.trim()
-                    if (PRIVATE_DNS_HOST_REGEX.matches(host)) {
-                        viewModel.executeCommand("settings put global private_dns_mode hostname; settings put global private_dns_specifier '$host'")
-                    }
-                },
+                onClick = { viewModel.setPrivateDnsHostname(customDnsHost) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = hostIsValid
             ) {
-                Text("Apply Custom Hostname")
+                Text(stringResource(R.string.dns_apply_custom))
             }
         }
     }
 }
-
-// Dot-separated labels of letters, digits and hyphens, e.g. dns.quad9.net.
-private val PRIVATE_DNS_HOST_REGEX =
-    Regex("^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")

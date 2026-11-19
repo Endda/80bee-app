@@ -9,23 +9,25 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
+import com.eightbee.app.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HaInstallerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
-    val context = LocalContext.current
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Home Assistant Setup") },
+                title = { Text(stringResource(R.string.ha_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back)
+                        )
                     }
                 }
             )
@@ -38,20 +40,19 @@ fun HaInstallerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Description card
             OutlinedCard(
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Home Assistant Core on Android",
+                        text = stringResource(R.string.ha_card_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Turn your phone into a dedicated smart home server. This wizard prepares Android systems, disables battery hibernation policies, sets permissions for Termux, and injects python setup commands directly into Termux terminals.",
+                        text = stringResource(R.string.ha_card_desc),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -60,19 +61,30 @@ fun HaInstallerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("Installation Wizard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                stringResource(R.string.ha_wizard_header),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Step 1
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Step 1: System Preparation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Disables android battery standby optimizations, allows terminal executions, and enables wake locks for background processes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.ha_step1_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    stringResource(R.string.ha_step1_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = { viewModel.prepareHaSystem() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Prepare Android System")
+                    Text(stringResource(R.string.ha_step1_button))
                 }
             }
 
@@ -80,16 +92,23 @@ fun HaInstallerScreen(viewModel: MainViewModel, onBack: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Step 2
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Step 2: Start Deploy in Termux", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Launches Termux and automatically injects python setup scripts. Note: Requires Termux installed on the device. On local connections, ensure USB Debugging (Security Settings) is enabled if text input injection fails.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.ha_step2_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    stringResource(R.string.ha_step2_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 FilledTonalButton(
-                    onClick = { viewModel.deployHomeAssistant(context) },
+                    onClick = { viewModel.deployHomeAssistant() },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Deploy Home Assistant")
+                    Text(stringResource(R.string.ha_step2_button))
                 }
             }
         }
