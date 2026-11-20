@@ -12,7 +12,7 @@ The application operates in two modes:
 2. **OTG Host Mode (Device-to-Device):** When connected to another Android device via a USB OTG cable, it turns your device into an ADB/Fastboot host to debug, configure, or flash the connected client device.
 
 **Note**: I have been hand-coding websites for over 25 years, but building a native Android app is outside of my skillset. 
-So while I'm learning the ropes, this APK file is being developed with LLM editors (Antigravity). 
+So while I'm learning the ropes, this APK file is being developed with command line LLM IDEs (AGY & Claude). 
 I research, test, and implement the features on the 80bee.com website. . .then those features get ported to the native app.
 
 ---
