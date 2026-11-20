@@ -17,6 +17,12 @@ import org.json.JSONObject
 import java.io.IOException
 import java.io.OutputStream
 
+/** User-visible snapshot export/import outcome with explicit error/warning flag. */
+data class SnapshotFeedback(
+    val message: String,
+    val isError: Boolean = false
+)
+
 /** Handles bloatware scanning, package disable/uninstall/restore, and snapshot export/import. */
 class DebloaterController internal constructor(
     private val loadUltimateDb: () -> Map<String, BloatInfo>,
@@ -60,8 +66,8 @@ class DebloaterController internal constructor(
     private val _disabledPackages = MutableStateFlow<Set<String>>(emptySet())
     val disabledPackages: StateFlow<Set<String>> = _disabledPackages.asStateFlow()
 
-    private val _snapshotFeedback = MutableStateFlow<String?>(null)
-    val snapshotFeedback: StateFlow<String?> = _snapshotFeedback.asStateFlow()
+    private val _snapshotFeedback = MutableStateFlow<SnapshotFeedback?>(null)
+    val snapshotFeedback: StateFlow<SnapshotFeedback?> = _snapshotFeedback.asStateFlow()
 
     private suspend fun runPmListPackages(conn: ConnectionManager, command: String): List<String> {
         val raw = conn.runShellCommand(command).trim()
@@ -98,25 +104,36 @@ class DebloaterController internal constructor(
         }
     }
 
-    fun scanDegoogle(maxTier: Int) {
-        runExclusive("Scanning for Google packages...", true) { conn ->
-            val installed = queryInstalledAndDisabled(conn)
-            val filtered = loadDegoogleDb().filter { preset ->
-                installed.contains(preset.id) && preset.tier <= maxTier
-            }
-            _degoogleList.value = filtered
-            "Scan complete. Found ${filtered.size} Google packages."
-        }
-    }
+    fun scanDegoogle(maxTier: Int) = scanPresetCatalog(
+        initialStatus = "Scanning for Google packages...",
+        packageCategory = "Google",
+        maxTier = maxTier,
+        loadCatalog = loadDegoogleDb,
+        targetFlow = _degoogleList
+    )
 
-    fun scanDesamsung(maxTier: Int) {
-        runExclusive("Scanning for Samsung packages...", true) { conn ->
+    fun scanDesamsung(maxTier: Int) = scanPresetCatalog(
+        initialStatus = "Scanning for Samsung packages...",
+        packageCategory = "Samsung",
+        maxTier = maxTier,
+        loadCatalog = loadSamsungDb,
+        targetFlow = _desamsungList
+    )
+
+    private fun scanPresetCatalog(
+        initialStatus: String,
+        packageCategory: String,
+        maxTier: Int,
+        loadCatalog: () -> List<PresetPkg>,
+        targetFlow: MutableStateFlow<List<PresetPkg>>
+    ) {
+        runExclusive(initialStatus, true) { conn ->
             val installed = queryInstalledAndDisabled(conn)
-            val filtered = loadSamsungDb().filter { preset ->
+            val filtered = loadCatalog().filter { preset ->
                 installed.contains(preset.id) && preset.tier <= maxTier
             }
-            _desamsungList.value = filtered
-            "Scan complete. Found ${filtered.size} Samsung packages."
+            targetFlow.value = filtered
+            "Scan complete. Found ${filtered.size} $packageCategory packages."
         }
     }
 
@@ -220,13 +237,13 @@ class DebloaterController internal constructor(
                     writer.write(payload)
                 }
                 val msg = "Exported snapshot with ${packages.size} package(s)."
-                _snapshotFeedback.value = msg
+                _snapshotFeedback.value = SnapshotFeedback(msg, isError = false)
                 msg
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val msg = "Failed to export snapshot: ${e.message ?: "Write error"}"
-                _snapshotFeedback.value = msg
+                _snapshotFeedback.value = SnapshotFeedback(msg, isError = true)
                 msg
             }
         }
@@ -252,14 +269,14 @@ class DebloaterController internal constructor(
                         append(" Ignored ${parsed.rejectedCount} invalid package entry/entries.")
                     }
                 }
-                _snapshotFeedback.value = statusMsg
+                _snapshotFeedback.value = SnapshotFeedback(statusMsg, isError = parsed.rejectedCount > 0)
                 statusMsg
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _restoreList.value = emptyList()
                 val msg = "Failed to load snapshot: ${e.message ?: "Invalid format"}"
-                _snapshotFeedback.value = msg
+                _snapshotFeedback.value = SnapshotFeedback(msg, isError = true)
                 msg
             }
         }

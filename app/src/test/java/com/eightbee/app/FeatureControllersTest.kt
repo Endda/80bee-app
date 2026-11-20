@@ -10,6 +10,7 @@ import com.eightbee.app.features.DebloaterController
 import com.eightbee.app.features.DeviceTweaksController
 import com.eightbee.app.features.FastbootCommandPolicy
 import com.eightbee.app.features.FastbootValidationResult
+import com.eightbee.app.features.SnapshotFeedback
 import com.eightbee.app.features.parseKeyValueOutput
 import com.eightbee.app.features.parsePmListPackages
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -386,25 +387,37 @@ class FeatureControllersTest {
 
         // Export success
         controller.exportSnapshot { if (shouldFailExport) null else exported }
-        assertEquals("Exported snapshot with 1 package(s).", controller.snapshotFeedback.value)
+        assertEquals(
+            SnapshotFeedback("Exported snapshot with 1 package(s).", isError = false),
+            controller.snapshotFeedback.value
+        )
         assertEquals("com.example.installed", exported.toString(Charsets.UTF_8.name()))
 
         // Export failure
         shouldFailExport = true
         controller.exportSnapshot { null }
-        assertEquals("Failed to export snapshot: Unable to open destination file.", controller.snapshotFeedback.value)
+        assertEquals(
+            SnapshotFeedback("Failed to export snapshot: Unable to open destination file.", isError = true),
+            controller.snapshotFeedback.value
+        )
 
         // Import success without rejected entries
         snapshotInput = "clean"
         controller.importSnapshot { snapshotInput }
         assertEquals(listOf("com.example.missing"), controller.restoreList.value.map { it.id })
-        assertEquals("Loaded 1 missing package(s) from snapshot.", controller.snapshotFeedback.value)
+        assertEquals(
+            SnapshotFeedback("Loaded 1 missing package(s) from snapshot.", isError = false),
+            controller.snapshotFeedback.value
+        )
 
-        // Import with rejected entries triggers Ignored warning
+        // Import with rejected entries triggers error/warning flag
         snapshotInput = "with-invalid"
         controller.importSnapshot { snapshotInput }
         assertEquals(
-            "Loaded 1 missing package(s) from snapshot. Ignored 1 invalid package entry/entries.",
+            SnapshotFeedback(
+                "Loaded 1 missing package(s) from snapshot. Ignored 1 invalid package entry/entries.",
+                isError = true
+            ),
             controller.snapshotFeedback.value
         )
 
@@ -412,7 +425,10 @@ class FeatureControllersTest {
         snapshotInput = "bad"
         controller.importSnapshot { snapshotInput }
         assertTrue(controller.restoreList.value.isEmpty())
-        assertEquals("Failed to load snapshot: Malformed snapshot", controller.snapshotFeedback.value)
+        assertEquals(
+            SnapshotFeedback("Failed to load snapshot: Malformed snapshot", isError = true),
+            controller.snapshotFeedback.value
+        )
 
         // Disabled scan clears snapshotFeedback
         controller.scanDisabledPackages()
