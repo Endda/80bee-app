@@ -6,9 +6,11 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.graphics.drawable.toBitmap
 import com.eightbee.app.InstallStep
+import com.eightbee.app.SideloadInstallOptions
 import com.eightbee.app.SideloadState
 import com.eightbee.app.connection.ConnectionManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,27 +24,37 @@ import java.io.IOException
 import java.util.zip.ZipInputStream
 
 /** Manages APK / split-APK archive parsing and staged ADB session installation. */
-class SideloadController(
-    private val application: Application,
+class SideloadController internal constructor(
     private val scope: CoroutineScope,
-    private val connectionProvider: () -> ConnectionManager?
+    private val connectionProvider: () -> ConnectionManager?,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val application: Application? = null
 ) {
+    constructor(
+        application: Application,
+        scope: CoroutineScope,
+        connectionProvider: () -> ConnectionManager?
+    ) : this(
+        scope = scope,
+        connectionProvider = connectionProvider,
+        ioDispatcher = Dispatchers.IO,
+        application = application
+    )
+
     private val _state = MutableStateFlow<SideloadState>(SideloadState.Idle)
     val state: StateFlow<SideloadState> = _state.asStateFlow()
     private var activeJob: Job? = null
 
     fun startSideload(uri: Uri) {
+        val app = checkNotNull(application) { "Application is required to parse sideload URIs." }
         activeJob?.cancel()
-        val prevState = _state.value
-        if (prevState is SideloadState.ConfigReady) {
-            prevState.apkFiles.forEach { it.delete() }
-        }
-        activeJob = scope.launch(Dispatchers.IO) {
+        deletePendingApkFiles()
+        activeJob = scope.launch(ioDispatcher) {
             _state.value = SideloadState.CopyingAndParsing
             val tempFiles = mutableListOf<File>()
             try {
-                val contentResolver = application.contentResolver
-                val fileName = getUriFileName(application, uri)
+                val contentResolver = app.contentResolver
+                val fileName = getUriFileName(app, uri)
                 val isArchive = fileName.endsWith(".zip", true) ||
                     fileName.endsWith(".apks", true) ||
                     fileName.endsWith(".apkm", true) ||
@@ -62,7 +74,7 @@ class SideloadController(
                                         throw IOException("Archive contains too many APK files.")
                                     }
                                     val baseName = File(entry.name).name
-                                    val tempFile = File(application.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
+                                    val tempFile = File(app.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
                                     tempFiles.add(tempFile)
                                     if (baseName.equals("base.apk", ignoreCase = true) && explicitBaseApk == null) {
                                         explicitBaseApk = tempFile
@@ -77,7 +89,7 @@ class SideloadController(
                         }
                     }
                 } else {
-                    val tempFile = File(application.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
+                    val tempFile = File(app.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
                     tempFiles.add(tempFile)
                     val apkStream = contentResolver.openInputStream(uri)
                         ?: throw IOException("Unable to open selected APK file.")
@@ -97,7 +109,7 @@ class SideloadController(
                     ?: tempFiles.maxByOrNull { it.length() }
                     ?: tempFiles.first()
 
-                val packageManager = application.packageManager
+                val packageManager = app.packageManager
                 val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     packageManager.getPackageArchiveInfo(baseApk.absolutePath, PackageManager.PackageInfoFlags.of(0L))
                 } else {
@@ -148,10 +160,10 @@ class SideloadController(
                     targetDeviceSdk = targetDeviceSdk
                 )
             } catch (e: CancellationException) {
-                tempFiles.forEach { it.delete() }
+                deleteApkFiles(tempFiles)
                 throw e
             } catch (e: Exception) {
-                tempFiles.forEach { it.delete() }
+                deleteApkFiles(tempFiles)
                 _state.value = SideloadState.Error(
                     "Failed to parse APK: ${e.localizedMessage ?: e.message}",
                     InstallStep.CHECK_CONNECTION
@@ -162,125 +174,134 @@ class SideloadController(
 
     fun executeInstall(
         config: SideloadState.ConfigReady,
-        bypassLowTargetSdk: Boolean,
-        grantAllPermissions: Boolean,
-        allowDowngrade: Boolean,
-        testOnly: Boolean,
-        installToSdCard: Boolean
+        options: SideloadInstallOptions = SideloadInstallOptions()
     ) {
         if (activeJob?.isActive == true) return
         val connection = connectionProvider()
         if (connection == null || !connection.isAvailable()) {
+            deleteApkFiles(config.apkFiles)
             _state.value = SideloadState.Error(
                 "Device connection not active or unauthorized.",
                 InstallStep.CHECK_CONNECTION
             )
-            config.apkFiles.forEach { it.delete() }
             return
         }
 
-        activeJob = scope.launch(Dispatchers.IO) {
-            val completedSteps = mutableSetOf<InstallStep>()
-            _state.value = SideloadState.Installing(InstallStep.CHECK_CONNECTION, completedSteps.toSet())
-            completedSteps.add(InstallStep.CHECK_CONNECTION)
-
-            _state.value = SideloadState.Installing(InstallStep.CREATE_SESSION, completedSteps.toSet())
-            val installCmd = buildString {
-                append("cmd package install-create -r")
-                if (bypassLowTargetSdk) append(" --bypass-low-target-sdk-block")
-                if (grantAllPermissions) append(" -g")
-                if (allowDowngrade) append(" -d")
-                if (testOnly) append(" -t")
-                if (installToSdCard) append(" -s")
+        activeJob = scope.launch(ioDispatcher) {
+            val terminalState = try {
+                runInstallSteps(connection, config, options)
+            } finally {
+                deleteApkFiles(config.apkFiles)
             }
+            _state.value = terminalState
+        }
+    }
 
-            val createResult = try {
-                connection.runShellCommand(installCmd)
-            } catch (e: CancellationException) {
-                config.apkFiles.forEach { it.delete() }
-                throw e
-            } catch (e: Exception) {
-                _state.value = SideloadState.Error(
-                    "Failed to create install session: ${e.message ?: "Connection error"}",
-                    InstallStep.CREATE_SESSION
-                )
-                config.apkFiles.forEach { it.delete() }
-                return@launch
-            }
-            if (!createResult.contains("Success", ignoreCase = true)) {
-                _state.value = SideloadState.Error("Failed to create install session: $createResult", InstallStep.CREATE_SESSION)
-                config.apkFiles.forEach { it.delete() }
-                return@launch
-            }
+    private suspend fun runInstallSteps(
+        connection: ConnectionManager,
+        config: SideloadState.ConfigReady,
+        options: SideloadInstallOptions
+    ): SideloadState {
+        val completedSteps = mutableSetOf<InstallStep>()
+        _state.value = SideloadState.Installing(InstallStep.CHECK_CONNECTION, completedSteps.toSet())
+        completedSteps.add(InstallStep.CHECK_CONNECTION)
 
-            val sessionId = Regex("\\[(\\d+)\\]").find(createResult)?.groupValues?.get(1)
-            if (sessionId == null) {
-                _state.value = SideloadState.Error("Could not parse session ID from: $createResult", InstallStep.CREATE_SESSION)
-                config.apkFiles.forEach { it.delete() }
-                return@launch
-            }
+        _state.value = SideloadState.Installing(InstallStep.CREATE_SESSION, completedSteps.toSet())
+        val installCmd = buildInstallCreateCommand(options)
+        val createResult = try {
+            connection.runShellCommand(installCmd)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return SideloadState.Error(
+                "Failed to create install session: ${e.message ?: "Connection error"}",
+                InstallStep.CREATE_SESSION
+            )
+        }
+        if (!createResult.contains("Success", ignoreCase = true)) {
+            return SideloadState.Error(
+                "Failed to create install session: $createResult",
+                InstallStep.CREATE_SESSION
+            )
+        }
 
-            completedSteps.add(InstallStep.CREATE_SESSION)
-            _state.value = SideloadState.Installing(InstallStep.STREAM_APKS, completedSteps.toSet())
+        val sessionId = Regex("\\[(\\d+)\\]").find(createResult)?.groupValues?.get(1)
+            ?: return SideloadState.Error(
+                "Could not parse session ID from: $createResult",
+                InstallStep.CREATE_SESSION
+            )
 
-            try {
-                config.apkFiles.forEachIndexed { index, file ->
-                    val progressText = "Streaming ${file.name} (${file.length() / 1024 / 1024} MB)... [${index + 1}/${config.apkFiles.size}]"
-                    _state.value = SideloadState.Installing(InstallStep.STREAM_APKS, completedSteps.toSet(), progressText)
+        completedSteps.add(InstallStep.CREATE_SESSION)
+        _state.value = SideloadState.Installing(InstallStep.STREAM_APKS, completedSteps.toSet())
 
-                    FileInputStream(file).use { fis ->
-                        val writeCommand = "cmd package install-write -S ${file.length()} $sessionId split_$index.apk -"
-                        val writeResult = connection.runShellCommandWithInput(writeCommand, fis)
-                        if (!writeResult.contains("Success", ignoreCase = true) || writeResult.contains("Failure", ignoreCase = true)) {
-                            connection.runShellCommand("cmd package install-abandon $sessionId")
-                            throw Exception("Failed to write ${file.name}: $writeResult")
-                        }
+        try {
+            config.apkFiles.forEachIndexed { index, file ->
+                val progressText = "Streaming ${file.name} (${file.length() / 1024 / 1024} MB)... [${index + 1}/${config.apkFiles.size}]"
+                _state.value = SideloadState.Installing(InstallStep.STREAM_APKS, completedSteps.toSet(), progressText)
+
+                FileInputStream(file).use { fis ->
+                    val writeCommand = "cmd package install-write -S ${file.length()} $sessionId split_$index.apk -"
+                    val writeResult = connection.runShellCommandWithInput(writeCommand, fis)
+                    if (!writeResult.contains("Success", ignoreCase = true) || writeResult.contains("Failure", ignoreCase = true)) {
+                        throw IOException("Failed to write ${file.name}: $writeResult")
                     }
                 }
-                completedSteps.add(InstallStep.STREAM_APKS)
-            } catch (e: CancellationException) {
-                config.apkFiles.forEach { it.delete() }
-                throw e
-            } catch (e: Exception) {
-                runCatching { connection.runShellCommand("cmd package install-abandon $sessionId") }
-                _state.value = SideloadState.Error(e.message ?: "Failed to stream APKs", InstallStep.STREAM_APKS)
-                config.apkFiles.forEach { it.delete() }
-                return@launch
             }
+            completedSteps.add(InstallStep.STREAM_APKS)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            runCatching { connection.runShellCommand("cmd package install-abandon $sessionId") }
+            return SideloadState.Error(e.message ?: "Failed to stream APKs", InstallStep.STREAM_APKS)
+        }
 
-            _state.value = SideloadState.Installing(InstallStep.COMMIT_INSTALL, completedSteps.toSet())
-            val commitResult = try {
-                connection.runShellCommand("cmd package install-commit $sessionId")
-            } catch (e: CancellationException) {
-                config.apkFiles.forEach { it.delete() }
-                throw e
-            } catch (e: Exception) {
-                config.apkFiles.forEach { it.delete() }
-                _state.value = SideloadState.Error(
-                    "Installation failed: ${e.message ?: "Connection error"}",
-                    InstallStep.COMMIT_INSTALL
-                )
-                return@launch
-            }
-            config.apkFiles.forEach { it.delete() }
+        _state.value = SideloadState.Installing(InstallStep.COMMIT_INSTALL, completedSteps.toSet())
+        val commitResult = try {
+            connection.runShellCommand("cmd package install-commit $sessionId")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return SideloadState.Error(
+                "Installation failed: ${e.message ?: "Connection error"}",
+                InstallStep.COMMIT_INSTALL
+            )
+        }
 
-            if (commitResult.contains("Success", ignoreCase = true)) {
-                completedSteps.add(InstallStep.COMMIT_INSTALL)
-                _state.value = SideloadState.Success(config.appLabel)
-            } else {
-                val detail = commitResult.ifBlank { "No response received from package manager." }
-                _state.value = SideloadState.Error("Installation failed: $detail", InstallStep.COMMIT_INSTALL)
-            }
+        return if (commitResult.contains("Success", ignoreCase = true)) {
+            completedSteps.add(InstallStep.COMMIT_INSTALL)
+            SideloadState.Success(config.appLabel)
+        } else {
+            val detail = commitResult.ifBlank { "No response received from package manager." }
+            SideloadState.Error("Installation failed: $detail", InstallStep.COMMIT_INSTALL)
         }
     }
 
     fun clear() {
         activeJob?.cancel()
         activeJob = null
+        deletePendingApkFiles()
+        _state.value = SideloadState.Idle
+    }
+
+    private fun deletePendingApkFiles() {
         val currentState = _state.value
         if (currentState is SideloadState.ConfigReady) {
-            currentState.apkFiles.forEach { it.delete() }
+            deleteApkFiles(currentState.apkFiles)
         }
-        _state.value = SideloadState.Idle
+    }
+
+    private fun deleteApkFiles(files: List<File>) {
+        files.forEach { it.delete() }
+    }
+
+    internal companion object {
+        fun buildInstallCreateCommand(options: SideloadInstallOptions): String = buildString {
+            append("cmd package install-create -r")
+            if (options.bypassLowTargetSdk) append(" --bypass-low-target-sdk-block")
+            if (options.grantAllPermissions) append(" -g")
+            if (options.allowDowngrade) append(" -d")
+            if (options.testOnly) append(" -t")
+            if (options.installToSdCard) append(" -s")
+        }
     }
 }

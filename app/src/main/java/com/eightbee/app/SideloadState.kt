@@ -31,6 +31,15 @@ sealed class SideloadState {
     data class Error(val message: String, val step: InstallStep) : SideloadState()
 }
 
+/** User-configurable `cmd package install-create` flags for APK sideloading. */
+data class SideloadInstallOptions(
+    val bypassLowTargetSdk: Boolean = false,
+    val grantAllPermissions: Boolean = false,
+    val allowDowngrade: Boolean = false,
+    val testOnly: Boolean = false,
+    val installToSdCard: Boolean = false
+)
+
 enum class InstallStep {
     CHECK_CONNECTION,
     CREATE_SESSION,
@@ -44,15 +53,6 @@ enum class InstallStep {
             CREATE_SESSION -> R.string.sideload_step_create_session
             STREAM_APKS -> R.string.sideload_step_stream_apks
             COMMIT_INSTALL -> R.string.sideload_step_commit_install
-        }
-    }
-
-    fun getDisplayName(): String {
-        return when (this) {
-            CHECK_CONNECTION -> "Verify Connection"
-            CREATE_SESSION -> "Create Installation Session"
-            STREAM_APKS -> "Transfer Installation Files"
-            COMMIT_INSTALL -> "Finalize Installation"
         }
     }
 }
