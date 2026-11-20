@@ -33,6 +33,7 @@ class OtgConnectionManagerTest {
     val tempFolder = TemporaryFolder()
 
     private class FakeAdbServer(
+        private val onWrite: (destination: String, server: FakeAdbServer, localId: Int, remoteId: Int, data: ByteArray) -> Unit = { _, _, _, _, _ -> },
         private val onOpen: (destination: String, server: FakeAdbServer, localId: Int, remoteId: Int) -> Unit
     ) : AutoCloseable {
         private val deviceToHostOut = PipedOutputStream()
@@ -80,10 +81,12 @@ class OtgConnectionManagerTest {
                         }
                         AdbProtocol.CMD_WRTE -> {
                             val remoteId = message.arg1
+                            val localId = message.arg0
                             val dest = streamDestinations[remoteId].orEmpty()
                             val payload = message.payload?.copyOf() ?: ByteArray(0)
                             receivedWrites.add(dest to payload)
-                            sendPacket(AdbProtocol.generateReady(remoteId, message.arg0))
+                            sendPacket(AdbProtocol.generateReady(remoteId, localId))
+                            onWrite(dest, this@FakeAdbServer, localId, remoteId, payload)
                         }
                         AdbProtocol.CMD_CLSE -> {
                             val remoteId = message.arg1
@@ -165,7 +168,7 @@ class OtgConnectionManagerTest {
     ): OtgConnectionManager {
         return OtgConnectionManager(
             filesDirProvider = { tempFolder.root },
-            ioDispatcher = Dispatchers.Unconfined,
+            ioDispatcher = Dispatchers.IO,
             cryptoProvider = { null },
             logSink = { _, _, _ -> },
             initialAdbConnection = adbConnection,
@@ -173,7 +176,7 @@ class OtgConnectionManagerTest {
         )
     }
 
-    @Test
+    @Test(timeout = 10_000L)
     fun runShellCommand_readsTrimmedOutputAndWrapsNonIoFailures() = runBlocking {
         FakeAdbServer { dest, server, localId, remoteId ->
             when (dest) {
@@ -204,18 +207,21 @@ class OtgConnectionManagerTest {
         disconnected.close()
     }
 
-    @Test
+    @Test(timeout = 10_000L)
     fun runShellCommandWithInput_streamsChunkedStdinAndReadsOutput() = runBlocking {
         val payload = ByteArray(5000) { ('a'.code + (it % 26)).toByte() }
-        FakeAdbServer { _, server, localId, remoteId ->
-            server.sendOkay(remoteId, localId)
-            // Delay response slightly so writerJob transmits chunks before EOF
-            Thread {
-                Thread.sleep(60)
-                server.sendWrite(remoteId, localId, "done\n".toByteArray(StandardCharsets.UTF_8))
-                server.sendClose(remoteId, localId)
-            }.start()
-        }.use { server ->
+        val totalReceived = java.util.concurrent.atomic.AtomicInteger(0)
+        FakeAdbServer(
+            onOpen = { _, server, localId, remoteId ->
+                server.sendOkay(remoteId, localId)
+            },
+            onWrite = { _, server, localId, remoteId, data ->
+                if (totalReceived.addAndGet(data.size) >= payload.size) {
+                    server.sendWrite(remoteId, localId, "done\n".toByteArray(StandardCharsets.UTF_8))
+                    server.sendClose(remoteId, localId)
+                }
+            }
+        ).use { server ->
             val manager = createManager(adbConnection = server.connection)
             val result = manager.runShellCommandWithInput("cat", ByteArrayInputStream(payload))
 
