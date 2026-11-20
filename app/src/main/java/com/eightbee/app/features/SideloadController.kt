@@ -9,6 +9,7 @@ import com.eightbee.app.InstallStep
 import com.eightbee.app.SideloadState
 import com.eightbee.app.connection.ConnectionManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,27 +23,40 @@ import java.io.IOException
 import java.util.zip.ZipInputStream
 
 /** Manages APK / split-APK archive parsing and staged ADB session installation. */
-class SideloadController(
-    private val application: Application,
+class SideloadController internal constructor(
     private val scope: CoroutineScope,
-    private val connectionProvider: () -> ConnectionManager?
+    private val connectionProvider: () -> ConnectionManager?,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val application: Application? = null
 ) {
+    constructor(
+        application: Application,
+        scope: CoroutineScope,
+        connectionProvider: () -> ConnectionManager?
+    ) : this(
+        scope = scope,
+        connectionProvider = connectionProvider,
+        ioDispatcher = Dispatchers.IO,
+        application = application
+    )
+
     private val _state = MutableStateFlow<SideloadState>(SideloadState.Idle)
     val state: StateFlow<SideloadState> = _state.asStateFlow()
     private var activeJob: Job? = null
 
     fun startSideload(uri: Uri) {
+        val app = checkNotNull(application) { "Application is required to parse sideload URIs." }
         activeJob?.cancel()
         val prevState = _state.value
         if (prevState is SideloadState.ConfigReady) {
             prevState.apkFiles.forEach { it.delete() }
         }
-        activeJob = scope.launch(Dispatchers.IO) {
+        activeJob = scope.launch(ioDispatcher) {
             _state.value = SideloadState.CopyingAndParsing
             val tempFiles = mutableListOf<File>()
             try {
-                val contentResolver = application.contentResolver
-                val fileName = getUriFileName(application, uri)
+                val contentResolver = app.contentResolver
+                val fileName = getUriFileName(app, uri)
                 val isArchive = fileName.endsWith(".zip", true) ||
                     fileName.endsWith(".apks", true) ||
                     fileName.endsWith(".apkm", true) ||
@@ -62,7 +76,7 @@ class SideloadController(
                                         throw IOException("Archive contains too many APK files.")
                                     }
                                     val baseName = File(entry.name).name
-                                    val tempFile = File(application.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
+                                    val tempFile = File(app.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
                                     tempFiles.add(tempFile)
                                     if (baseName.equals("base.apk", ignoreCase = true) && explicitBaseApk == null) {
                                         explicitBaseApk = tempFile
@@ -77,7 +91,7 @@ class SideloadController(
                         }
                     }
                 } else {
-                    val tempFile = File(application.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
+                    val tempFile = File(app.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
                     tempFiles.add(tempFile)
                     val apkStream = contentResolver.openInputStream(uri)
                         ?: throw IOException("Unable to open selected APK file.")
@@ -97,7 +111,7 @@ class SideloadController(
                     ?: tempFiles.maxByOrNull { it.length() }
                     ?: tempFiles.first()
 
-                val packageManager = application.packageManager
+                val packageManager = app.packageManager
                 val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     packageManager.getPackageArchiveInfo(baseApk.absolutePath, PackageManager.PackageInfoFlags.of(0L))
                 } else {
@@ -179,7 +193,7 @@ class SideloadController(
             return
         }
 
-        activeJob = scope.launch(Dispatchers.IO) {
+        activeJob = scope.launch(ioDispatcher) {
             val completedSteps = mutableSetOf<InstallStep>()
             _state.value = SideloadState.Installing(InstallStep.CHECK_CONNECTION, completedSteps.toSet())
             completedSteps.add(InstallStep.CHECK_CONNECTION)
