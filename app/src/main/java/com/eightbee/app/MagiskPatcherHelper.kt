@@ -2,10 +2,12 @@ package com.eightbee.app
 
 import android.util.Log
 import com.eightbee.app.features.MAX_BOOT_IMAGE_BYTES
+import com.eightbee.app.features.copyBounded
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FilterInputStream
+import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -37,7 +39,9 @@ object MagiskPatcherHelper {
     private const val BOOT_HEADER_PROBE_SIZE = 64
     private const val MAX_ANDROID_INFO_BYTES = 64 * 1024
     private const val MAX_MAGISK_COMPONENT_BYTES = 128L * 1024 * 1024
+    private const val ARCHIVE_ENTRY_OVERFLOW_MSG = "Archive image entry exceeds the 512 MB limit."
     private val PIXEL_6_SERIES = setOf("oriole", "raven", "bluejay")
+    private val FACTORY_FILENAME_REGEX = Regex("^([A-Za-z0-9_]+)-([A-Za-z0-9.]+)-factory-", RegexOption.IGNORE_CASE)
 
     fun resolveReconTarget(
         codename: String,
@@ -165,78 +169,58 @@ object MagiskPatcherHelper {
         var fallbackBootFile: File? = null
         var buildWarning = checkArchiveFilenameBuildMismatch(sourceFileName, expectedCodename, expectedBuildId)
 
-        try {
+        fun scanZip(zis: ZipInputStream, progressBase: Float, progressSpan: Float, allowInnerZip: Boolean): Boolean {
             while (true) {
-                val entry = outerZis.nextEntry ?: break
+                val entry = zis.nextEntry ?: break
                 if (entry.isDirectory) continue
 
                 val entryName = entry.name.substringAfterLast('/')
-                if (totalInputBytes > 0) {
+                if (allowInnerZip && totalInputBytes > 0) {
                     val scanProgress = (0.05f + (countingStream.bytesRead.toFloat() / totalInputBytes) * 0.45f)
                         .coerceIn(0.05f, 0.5f)
                     onProgress("SCANNING_ARCHIVE", scanProgress)
                 }
 
-                if (entryName.startsWith("image-") && entryName.endsWith(".zip")) {
-                    val innerBuildWarning = checkInnerZipBuildMismatch(entryName, expectedCodename, expectedBuildId)
-                    if (innerBuildWarning != null) {
-                        buildWarning = innerBuildWarning
-                    }
-
-                    onProgress("STREAMING_INNER_ARCHIVE", 0.5f)
-                    val nonClosingInnerSource = object : FilterInputStream(outerZis) {
-                        override fun close() {
-                            // Keep outerZis open until outer streaming finishes
+                when {
+                    allowInnerZip && entryName.startsWith("image-") && entryName.endsWith(".zip") -> {
+                        checkInnerZipBuildMismatch(entryName, expectedCodename, expectedBuildId)?.let {
+                            buildWarning = it
                         }
-                    }
-                    val innerZis = ZipInputStream(BufferedInputStream(nonClosingInnerSource, 64 * 1024))
-                    while (true) {
-                        val innerEntry = innerZis.nextEntry ?: break
-                        if (innerEntry.isDirectory) continue
-                        val innerName = innerEntry.name.substringAfterLast('/')
-
-                        if (innerName == "android-info.txt") {
-                            validateAndroidInfo(readCappedText(innerZis), expectedCodename)
-                            continue
-                        }
-
-                        if (isTargetImageEntry(innerName, desiredImageName)) {
-                            onProgress("EXTRACTING_BOOT_IMAGE", 0.7f)
-                            val outFile = File(cacheDir, "${innerName.substringBeforeLast('.')}_${System.currentTimeMillis()}.img")
-                            copyEntryToFile(innerZis, outFile, innerEntry.size) { frac ->
-                                onProgress("EXTRACTING_BOOT_IMAGE", 0.7f + frac * 0.25f)
-                            }
-                            if (desiredImageName != null || innerName == "init_boot.img") {
-                                fallbackBootFile?.delete()
-                                fallbackBootFile = null
-                                extractedFile = outFile
-                                break
-                            } else {
-                                fallbackBootFile?.delete()
-                                fallbackBootFile = outFile
+                        onProgress("STREAMING_INNER_ARCHIVE", 0.5f)
+                        val nonClosingInnerSource = object : FilterInputStream(zis) {
+                            override fun close() {
+                                // Keep outerZis open until outer streaming finishes
                             }
                         }
+                        val innerZis = ZipInputStream(BufferedInputStream(nonClosingInnerSource, 64 * 1024))
+                        if (scanZip(innerZis, progressBase = 0.7f, progressSpan = 0.25f, allowInnerZip = false)) {
+                            return true
+                        }
                     }
-                    if (extractedFile != null) break
-                } else if (entryName == "android-info.txt") {
-                    validateAndroidInfo(readCappedText(outerZis), expectedCodename)
-                } else if (isTargetImageEntry(entryName, desiredImageName)) {
-                    onProgress("EXTRACTING_BOOT_IMAGE", 0.6f)
-                    val outFile = File(cacheDir, "${entryName.substringBeforeLast('.')}_${System.currentTimeMillis()}.img")
-                    copyEntryToFile(outerZis, outFile, entry.size) { frac ->
-                        onProgress("EXTRACTING_BOOT_IMAGE", 0.6f + frac * 0.35f)
+                    entryName == "android-info.txt" -> {
+                        validateAndroidInfo(readCappedText(zis), expectedCodename)
                     }
-                    if (desiredImageName != null || entryName == "init_boot.img") {
+                    isTargetImageEntry(entryName, desiredImageName) -> {
+                        onProgress("EXTRACTING_BOOT_IMAGE", progressBase)
+                        val outFile = File(cacheDir, "${entryName.substringBeforeLast('.')}_${System.currentTimeMillis()}.img")
+                        copyEntryToFile(zis, outFile, entry.size) { frac ->
+                            onProgress("EXTRACTING_BOOT_IMAGE", progressBase + frac * progressSpan)
+                        }
                         fallbackBootFile?.delete()
                         fallbackBootFile = null
-                        extractedFile = outFile
-                        break
-                    } else {
-                        fallbackBootFile?.delete()
+                        if (desiredImageName != null || entryName == "init_boot.img") {
+                            extractedFile = outFile
+                            return true
+                        }
                         fallbackBootFile = outFile
                     }
                 }
             }
+            return false
+        }
+
+        try {
+            scanZip(outerZis, progressBase = 0.6f, progressSpan = 0.35f, allowInnerZip = true)
 
             val finalFile = extractedFile ?: fallbackBootFile
                 ?: throw IllegalArgumentException(
@@ -277,19 +261,17 @@ object MagiskPatcherHelper {
         onFraction: (Float) -> Unit
     ) {
         if (expectedSize > MAX_BOOT_IMAGE_BYTES) {
-            throw java.io.IOException("Archive image entry exceeds the 512 MB limit.")
+            throw IOException(ARCHIVE_ENTRY_OVERFLOW_MSG)
         }
         try {
             outFile.outputStream().use { output ->
-                val buffer = ByteArray(256 * 1024)
-                var bytesRead: Int
-                var totalCopied = 0L
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    totalCopied += bytesRead
-                    if (totalCopied > MAX_BOOT_IMAGE_BYTES) {
-                        throw java.io.IOException("Archive image entry exceeds the 512 MB limit.")
-                    }
-                    output.write(buffer, 0, bytesRead)
+                copyBounded(
+                    input = input,
+                    output = output,
+                    budget = MAX_BOOT_IMAGE_BYTES,
+                    overflowMessage = ARCHIVE_ENTRY_OVERFLOW_MSG,
+                    bufferSize = 256 * 1024
+                ) { totalCopied ->
                     if (expectedSize > 0) {
                         onFraction((totalCopied.toFloat() / expectedSize).coerceIn(0f, 1f))
                     }
@@ -330,20 +312,16 @@ object MagiskPatcherHelper {
         }
     }
 
-    private fun checkInnerZipBuildMismatch(
-        innerZipName: String,
+    private fun validateCodenameAndBuild(
+        archiveCodename: String,
+        archiveBuild: String,
         expectedCodename: String?,
-        expectedBuildId: String?
+        expectedBuildId: String?,
+        mismatchSubject: String
     ): String? {
-        // Expected pattern: image-<codename>-<build>.zip
-        val stem = innerZipName.removePrefix("image-").removeSuffix(".zip")
-        val parts = stem.split('-', limit = 2)
-        if (parts.size < 2) return null
-        val archiveCodename = parts[0]
-        val archiveBuild = parts[1]
         if (!expectedCodename.isNullOrBlank() && !archiveCodename.equals(expectedCodename, ignoreCase = true)) {
             throw IllegalArgumentException(
-                "Device mismatch: firmware image is for '$archiveCodename', but connected device is '$expectedCodename'."
+                "Device mismatch: $mismatchSubject '$archiveCodename', but connected device is '$expectedCodename'."
             )
         }
         if (!expectedBuildId.isNullOrBlank() &&
@@ -355,6 +333,17 @@ object MagiskPatcherHelper {
         return null
     }
 
+    private fun checkInnerZipBuildMismatch(
+        innerZipName: String,
+        expectedCodename: String?,
+        expectedBuildId: String?
+    ): String? {
+        // Expected pattern: image-<codename>-<build>.zip
+        val parts = innerZipName.removePrefix("image-").removeSuffix(".zip").split('-', limit = 2)
+        if (parts.size < 2) return null
+        return validateCodenameAndBuild(parts[0], parts[1], expectedCodename, expectedBuildId, "firmware image is for")
+    }
+
     private fun checkArchiveFilenameBuildMismatch(
         sourceFileName: String,
         expectedCodename: String?,
@@ -362,21 +351,8 @@ object MagiskPatcherHelper {
     ): String? {
         if (sourceFileName.isBlank() || expectedBuildId.isNullOrBlank()) return null
         // Factory zip filenames look like: <codename>-<build>-factory-<hash>.zip
-        val factoryRegex = Regex("^([A-Za-z0-9_]+)-([A-Za-z0-9.]+)-factory-", RegexOption.IGNORE_CASE)
-        val match = factoryRegex.find(sourceFileName) ?: return null
-        val fileCodename = match.groupValues[1]
-        val fileBuild = match.groupValues[2]
-        if (!expectedCodename.isNullOrBlank() && !fileCodename.equals(expectedCodename, ignoreCase = true)) {
-            throw IllegalArgumentException(
-                "Device mismatch: filename indicates '$fileCodename', but connected device is '$expectedCodename'."
-            )
-        }
-        if (!expectedBuildId.contains(fileBuild, ignoreCase = true) &&
-            !fileBuild.equals(expectedBuildId, ignoreCase = true)
-        ) {
-            return "Warning: archive build ($fileBuild) does not match device Build ID ($expectedBuildId). Verify you downloaded the matching factory image."
-        }
-        return null
+        val match = FACTORY_FILENAME_REGEX.find(sourceFileName) ?: return null
+        return validateCodenameAndBuild(match.groupValues[1], match.groupValues[2], expectedCodename, expectedBuildId, "filename indicates")
     }
 
     private class CountingInputStream(private val delegate: InputStream) : FilterInputStream(delegate) {
@@ -414,22 +390,17 @@ object MagiskPatcherHelper {
             for ((zipPath, targetName) in targets) {
                 val entry = zip.getEntry(zipPath) ?: continue
                 if (entry.size > MAX_MAGISK_COMPONENT_BYTES) {
-                    throw java.io.IOException("Magisk component $targetName exceeds size limit.")
+                    throw IOException("Magisk component $targetName exceeds size limit.")
                 }
                 val outFile = File(cacheDir, targetName)
                 zip.getInputStream(entry).use { input ->
                     outFile.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var copied = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            copied += read
-                            if (copied > MAX_MAGISK_COMPONENT_BYTES) {
-                                throw java.io.IOException("Magisk component $targetName exceeds size limit.")
-                            }
-                            output.write(buffer, 0, read)
-                        }
+                        copyBounded(
+                            input = input,
+                            output = output,
+                            budget = MAX_MAGISK_COMPONENT_BYTES,
+                            overflowMessage = "Magisk component $targetName exceeds size limit."
+                        )
                     }
                 }
                 extractedFiles[targetName] = outFile

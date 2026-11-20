@@ -20,9 +20,11 @@ internal fun copyBounded(
     input: InputStream,
     output: OutputStream,
     budget: Long,
-    overflowMessage: String = "Archive is too large to sideload."
+    overflowMessage: String = "Archive is too large to sideload.",
+    bufferSize: Int = 64 * 1024,
+    onBytesCopied: ((Long) -> Unit)? = null
 ): Long {
-    val buffer = ByteArray(64 * 1024)
+    val buffer = ByteArray(bufferSize)
     var copied = 0L
     while (true) {
         val read = input.read(buffer)
@@ -30,6 +32,7 @@ internal fun copyBounded(
         copied += read
         if (copied > budget) throw IOException(overflowMessage)
         output.write(buffer, 0, read)
+        onBytesCopied?.invoke(copied)
     }
     return copied
 }
