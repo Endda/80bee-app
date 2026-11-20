@@ -346,4 +346,77 @@ class FeatureControllersTest {
         assertEquals(listOf("getvar current-slot"), fakeConn.executedFastbootCommands)
         assertTrue(controller.utilityLogs.value.any { it.contains("INFO: current-slot: a") && it.contains("OKAY: finished") })
     }
+
+    @Test
+    fun debloaterController_snapshotExportAndImportReportFeedbackAndClearOnDisabledScan() = runBlocking {
+        val exported = java.io.ByteArrayOutputStream()
+        var snapshotInput = ""
+        val fakeConn = FakeConnectionManager(
+            shellResponder = { cmd ->
+                when (cmd) {
+                    "pm list packages" -> "package:com.example.installed"
+                    "pm list packages -d" -> "package:com.example.disabled"
+                    else -> ""
+                }
+            }
+        )
+        var shouldFailExport = false
+        val controller = DebloaterController(
+            loadUltimateDb = { emptyMap() },
+            loadDegoogleDb = { emptyList() },
+            loadSamsungDb = { emptyList() },
+            openOutputStream = { null },
+            readUriText = { "" },
+            runExclusive = { _, _, block -> runBlocking { block(fakeConn) } },
+            encodeSnapshot = { packages -> packages.joinToString(",") },
+            parseSnapshot = { raw ->
+                when (raw) {
+                    "clean" -> SnapshotParseResult(
+                        validPackages = linkedSetOf("com.example.installed", "com.example.missing"),
+                        rejectedCount = 0
+                    )
+                    "with-invalid" -> SnapshotParseResult(
+                        validPackages = linkedSetOf("com.example.missing"),
+                        rejectedCount = 1
+                    )
+                    else -> throw IllegalArgumentException("Malformed snapshot")
+                }
+            }
+        )
+
+        // Export success
+        controller.exportSnapshot { if (shouldFailExport) null else exported }
+        assertEquals("Exported snapshot with 1 package(s).", controller.snapshotFeedback.value)
+        assertEquals("com.example.installed", exported.toString(Charsets.UTF_8.name()))
+
+        // Export failure
+        shouldFailExport = true
+        controller.exportSnapshot { null }
+        assertEquals("Failed to export snapshot: Unable to open destination file.", controller.snapshotFeedback.value)
+
+        // Import success without rejected entries
+        snapshotInput = "clean"
+        controller.importSnapshot { snapshotInput }
+        assertEquals(listOf("com.example.missing"), controller.restoreList.value.map { it.id })
+        assertEquals("Loaded 1 missing package(s) from snapshot.", controller.snapshotFeedback.value)
+
+        // Import with rejected entries triggers Ignored warning
+        snapshotInput = "with-invalid"
+        controller.importSnapshot { snapshotInput }
+        assertEquals(
+            "Loaded 1 missing package(s) from snapshot. Ignored 1 invalid package entry/entries.",
+            controller.snapshotFeedback.value
+        )
+
+        // Import failure clears restoreList and reports error
+        snapshotInput = "bad"
+        controller.importSnapshot { snapshotInput }
+        assertTrue(controller.restoreList.value.isEmpty())
+        assertEquals("Failed to load snapshot: Malformed snapshot", controller.snapshotFeedback.value)
+
+        // Disabled scan clears snapshotFeedback
+        controller.scanDisabledPackages()
+        assertEquals(null, controller.snapshotFeedback.value)
+        assertEquals(listOf("com.example.disabled"), controller.restoreList.value.map { it.id })
+    }
 }

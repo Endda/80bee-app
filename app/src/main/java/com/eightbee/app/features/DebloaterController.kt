@@ -5,6 +5,7 @@ import android.net.Uri
 import com.eightbee.app.BloatInfo
 import com.eightbee.app.PackageDatabase
 import com.eightbee.app.PresetPkg
+import com.eightbee.app.SnapshotParseResult
 import com.eightbee.app.connection.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +24,14 @@ class DebloaterController internal constructor(
     private val loadSamsungDb: () -> List<PresetPkg>,
     private val openOutputStream: (Uri) -> OutputStream?,
     private val readUriText: (Uri) -> String,
-    private val runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit
+    private val runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit,
+    private val encodeSnapshot: (List<String>) -> String = { packages ->
+        JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("packages", JSONArray().apply { packages.forEach { put(it) } })
+        }.toString(2)
+    },
+    private val parseSnapshot: (String) -> SnapshotParseResult = PackageDatabase::parseSnapshotPackageNames
 ) {
     constructor(
         application: Application,
@@ -199,18 +207,17 @@ class DebloaterController internal constructor(
         }
     }
 
-    fun exportSnapshotToUri(uri: Uri) {
+    fun exportSnapshotToUri(uri: Uri) = exportSnapshot { openOutputStream(uri) }
+
+    internal fun exportSnapshot(openStream: () -> OutputStream?) {
         runExclusive("Exporting package snapshot...", true) { conn ->
             try {
                 val packages = runPmListPackages(conn, "pm list packages")
-                val obj = JSONObject().apply {
-                    put("timestamp", System.currentTimeMillis())
-                    put("packages", JSONArray().apply { packages.forEach { put(it) } })
-                }
-                val outputStream = openOutputStream(uri)
+                val payload = encodeSnapshot(packages)
+                val outputStream = openStream()
                     ?: throw IOException("Unable to open destination file.")
                 outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
-                    writer.write(obj.toString(2))
+                    writer.write(payload)
                 }
                 val msg = "Exported snapshot with ${packages.size} package(s)."
                 _snapshotFeedback.value = msg
@@ -225,11 +232,13 @@ class DebloaterController internal constructor(
         }
     }
 
-    fun importSnapshotFromUri(uri: Uri) {
+    fun importSnapshotFromUri(uri: Uri) = importSnapshot { readUriText(uri) }
+
+    internal fun importSnapshot(readText: () -> String) {
         runExclusive("Comparing snapshot against device...", true) { conn ->
             try {
-                val content = readUriText(uri)
-                val parsed = PackageDatabase.parseSnapshotPackageNames(content)
+                val content = readText()
+                val parsed = parseSnapshot(content)
                 val installed = queryInstalledAndDisabled(conn)
 
                 val missing = parsed.validPackages.filter { !installed.contains(it) }
