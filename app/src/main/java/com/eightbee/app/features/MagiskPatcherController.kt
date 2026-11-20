@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
+import java.util.EnumMap
 import java.util.Locale
 
 /** Coordinates the 6-step Pixel Magisk boot/init_boot patching and fastboot flashing workflow. */
@@ -59,31 +60,29 @@ class MagiskPatcherController internal constructor(
     private val _state = MutableStateFlow(PixelMagiskPatcherState())
     val state: StateFlow<PixelMagiskPatcherState> = _state.asStateFlow()
 
-    private var reconJob: Job? = null
-    private var bootFileJob: Job? = null
-    private var magiskApkJob: Job? = null
-    private var patchJob: Job? = null
-    private var rebootJob: Job? = null
-    private var flashJob: Job? = null
-    private var installApkJob: Job? = null
+    private enum class JobSlot {
+        RECON, BOOT_FILE, MAGISK_APK, PATCH, REBOOT, FLASH, INSTALL_APK
+    }
 
+    private val activeJobs = EnumMap<JobSlot, Job>(JobSlot::class.java)
     private var cachedComponents: Map<String, File> = emptyMap()
 
+    private fun isJobActive(slot: JobSlot): Boolean = activeJobs[slot]?.isActive == true
+
     private fun cancelActiveJobs() {
-        reconJob?.cancel()
-        bootFileJob?.cancel()
-        magiskApkJob?.cancel()
-        patchJob?.cancel()
-        rebootJob?.cancel()
-        flashJob?.cancel()
-        installApkJob?.cancel()
-        reconJob = null
-        bootFileJob = null
-        magiskApkJob = null
-        patchJob = null
-        rebootJob = null
-        flashJob = null
-        installApkJob = null
+        activeJobs.values.forEach { it.cancel() }
+        activeJobs.clear()
+    }
+
+    private fun launchJob(
+        slot: JobSlot,
+        replaceExisting: Boolean = false,
+        block: suspend CoroutineScope.() -> Unit
+    ) {
+        if (replaceExisting) {
+            activeJobs[slot]?.cancel()
+        }
+        activeJobs[slot] = scope.launch(ioDispatcher, block = block)
     }
 
     fun onConnectionStateChanged(connectionState: ConnectionState) {
@@ -131,8 +130,7 @@ class MagiskPatcherController internal constructor(
         currentState.bootFile?.delete()
         currentState.magiskApkFile?.delete()
         currentState.patchedFile?.delete()
-        cachedComponents = emptyMap()
-        File(cacheDirProvider(), "magisk_components").deleteRecursively()
+        clearMagiskComponentsCache()
         _state.value = PixelMagiskPatcherState(isActive = false)
     }
 
@@ -160,59 +158,20 @@ class MagiskPatcherController internal constructor(
         }
         if (!started) return
 
-        reconJob = scope.launch(ioDispatcher) {
+        launchJob(JobSlot.RECON, replaceExisting = true) {
             try {
                 if (!connection.isAvailable()) {
                     throw Exception("ADB Connection is still initializing or unauthorized. Please ensure target device is unlocked and authorize the USB debugging prompt on the target device screen.")
                 }
 
                 val props = connection.queryKeyValues(RECON_PROP_QUERIES)
-
-                val codename = props["codename"].orEmpty()
-                val buildId = props["build_id"].orEmpty()
-                val apiLevelStr = props["first_api"].orEmpty()
-                val boardApiLevelStr = props["board_api"].orEmpty()
-                val vendorApiLevelStr = props["vendor_api"].orEmpty()
-                val previewSdk = props["preview_sdk"]?.toIntOrNull() ?: 0
-                val buildCodename = props["build_codename"].orEmpty()
-                val abi = props["abi"].orEmpty()
-                val oemAllowed = props["oem_allowed"] == "1"
-                val currentSlot = props["slot_suffix"].orEmpty()
-
-                val flashLocked = props["flash_locked"].orEmpty()
-                val vbState = props["vb_state"].orEmpty()
-                val isUnlocked = flashLocked == "0" || vbState == "orange"
-
-                val isBeta = previewSdk > 0 || buildCodename != "REL" ||
-                    buildId.contains("beta", ignoreCase = true) ||
-                    buildId.contains("preview", ignoreCase = true)
-
-                val resolution = MagiskPatcherHelper.resolveReconTarget(
-                    codename = codename,
-                    abi = abi,
-                    firstApiLevelRaw = apiLevelStr,
-                    boardApiLevelRaw = boardApiLevelStr,
-                    vendorApiLevelRaw = vendorApiLevelStr
-                )
-
-                val deviceData = MagiskDeviceData(
-                    codename = codename,
-                    buildId = buildId,
-                    apiLevel = resolution.apiLevel,
-                    previewSdk = previewSdk,
-                    isBeta = isBeta,
-                    abi = abi,
-                    oemAllowed = oemAllowed,
-                    currentSlot = currentSlot,
-                    isUnlocked = isUnlocked,
-                    targetPartition = resolution.targetPartition
-                )
+                val deviceData = parseReconDeviceData(props)
 
                 _state.update {
                     it.copy(
                         reconPhase = ReconPhase.Succeeded,
                         deviceData = deviceData,
-                        showUnlockWarning = !isUnlocked
+                        showUnlockWarning = !deviceData.isUnlocked
                     )
                 }
             } catch (e: CancellationException) {
@@ -248,9 +207,7 @@ class MagiskPatcherController internal constructor(
             )
         }
 
-        bootFileJob?.cancel()
-        bootFileJob = scope.launch(ioDispatcher) {
-            var copiedRawFile: File? = null
+        launchJob(JobSlot.BOOT_FILE, replaceExisting = true) {
             try {
                 val cacheDir = cacheDirProvider()
                 val deviceData = _state.value.deviceData
@@ -283,48 +240,36 @@ class MagiskPatcherController internal constructor(
                         }
                     }
                 } else {
-                    val tempImg = File(cacheDir, "boot_${System.currentTimeMillis()}.img")
-                    copiedRawFile = tempImg
-                    val inputStream = openStream()
-                        ?: throw IllegalStateException("Unable to open selected image file.")
-                    inputStream.use { input ->
-                        tempImg.outputStream().use { output ->
-                            copyBounded(
-                                input = input,
-                                output = output,
-                                budget = MAX_BOOT_IMAGE_BYTES,
-                                overflowMessage = "Selected image exceeds the 512 MB boot image limit."
-                            )
-                        }
+                    val tempImg = copyStreamToCacheFile(
+                        fileName = "boot_${System.currentTimeMillis()}.img",
+                        budget = MAX_BOOT_IMAGE_BYTES,
+                        openErrorMessage = "Unable to open selected image file.",
+                        overflowMessage = "Selected image exceeds the 512 MB boot image limit.",
+                        openStream = openStream
+                    )
+                    try {
+                        MagiskPatcherHelper.validateBootImageForPartition(tempImg, deviceData?.targetPartition)
+                    } catch (e: Throwable) {
+                        tempImg.delete()
+                        throw e
                     }
-                    MagiskPatcherHelper.validateBootImageForPartition(tempImg, deviceData?.targetPartition)
                     BootExtractionResult(tempImg, buildWarning = null)
                 }
 
-                _state.value.bootFile?.let { oldFile ->
-                    if (oldFile.absolutePath != extractionResult.bootFile.absolutePath) {
-                        oldFile.delete()
-                    }
-                }
+                deleteIfReplaced(_state.value.bootFile, extractionResult.bootFile)
 
                 _state.update {
                     it.copy(
                         bootFile = extractionResult.bootFile,
                         bootFileName = extractionResult.bootFile.name,
-                        bootFileSize = String.format(
-                            Locale.US,
-                            "%.1f MB",
-                            extractionResult.bootFile.length().toFloat() / (1024 * 1024)
-                        ),
+                        bootFileSize = formatMegabytes(extractionResult.bootFile.length()),
                         firmwarePhase = FirmwarePhase.Loaded,
                         imageWarning = extractionResult.buildWarning
                     )
                 }
             } catch (e: CancellationException) {
-                copiedRawFile?.delete()
                 throw e
             } catch (e: Exception) {
-                copiedRawFile?.delete()
                 _state.update {
                     it.copy(
                         bootFile = null,
@@ -358,41 +303,25 @@ class MagiskPatcherController internal constructor(
         }
         addExtractLog("Scanning application: $fileName")
 
-        magiskApkJob?.cancel()
-        magiskApkJob = scope.launch(ioDispatcher) {
-            val cacheDir = cacheDirProvider()
-            val tempApkFile = File(cacheDir, "magisk_temp_${System.currentTimeMillis()}.apk")
-            val componentsDir = File(cacheDir, "magisk_components")
+        launchJob(JobSlot.MAGISK_APK, replaceExisting = true) {
+            var tempApkFile: File? = null
             try {
-                val apkStream = openStream()
-                    ?: throw IllegalStateException("Unable to open selected Magisk APK.")
-                apkStream.use { input ->
-                    tempApkFile.outputStream().use { output ->
-                        copyBounded(
-                            input = input,
-                            output = output,
-                            budget = MAX_MAGISK_APK_BYTES,
-                            overflowMessage = "Selected Magisk APK exceeds the 256 MB limit."
-                        )
-                    }
-                }
+                tempApkFile = copyStreamToCacheFile(
+                    fileName = "magisk_temp_${System.currentTimeMillis()}.apk",
+                    budget = MAX_MAGISK_APK_BYTES,
+                    openErrorMessage = "Unable to open selected Magisk APK.",
+                    overflowMessage = "Selected Magisk APK exceeds the 256 MB limit.",
+                    openStream = openStream
+                )
 
                 addExtractLog("Processing archive entries...")
 
-                componentsDir.deleteRecursively()
-                componentsDir.mkdirs()
-                val components = MagiskPatcherHelper.extractMagiskComponents(tempApkFile, componentsDir)
-                cachedComponents = components
-
+                val components = extractMagiskComponentsFresh(tempApkFile)
                 for (name in components.keys) {
                     addExtractLog("Decompressing $name...")
                 }
 
-                _state.value.magiskApkFile?.let { oldApk ->
-                    if (oldApk.absolutePath != tempApkFile.absolutePath) {
-                        oldApk.delete()
-                    }
-                }
+                deleteIfReplaced(_state.value.magiskApkFile, tempApkFile)
 
                 addExtractLog("Extraction complete. Environment ready.")
 
@@ -403,14 +332,12 @@ class MagiskPatcherController internal constructor(
                     )
                 }
             } catch (e: CancellationException) {
-                tempApkFile.delete()
-                cachedComponents = emptyMap()
-                componentsDir.deleteRecursively()
+                tempApkFile?.delete()
+                clearMagiskComponentsCache()
                 throw e
             } catch (e: Exception) {
-                tempApkFile.delete()
-                cachedComponents = emptyMap()
-                componentsDir.deleteRecursively()
+                tempApkFile?.delete()
+                clearMagiskComponentsCache()
                 _state.update {
                     it.copy(
                         magiskExtractPhase = MagiskExtractPhase.Failed(e.message ?: "Failed to extract Magisk components.")
@@ -422,7 +349,7 @@ class MagiskPatcherController internal constructor(
     }
 
     fun startPatching() {
-        if (patchJob?.isActive == true) return
+        if (isJobActive(JobSlot.PATCH)) return
         val connection = connectionProvider()?.takeIf { it.supportsFastboot } ?: return
         val currentState = _state.value
         val bootFile = currentState.bootFile ?: return
@@ -436,7 +363,7 @@ class MagiskPatcherController internal constructor(
         }
         addPatchLog("Initializing scoped workspace...", "INFO")
 
-        patchJob = scope.launch(ioDispatcher) {
+        launchJob(JobSlot.PATCH) {
             val workspace = "/data/local/tmp/80bee_patcher"
             try {
                 connection.runShellCommand("rm -rf $workspace && mkdir -p $workspace")
@@ -447,7 +374,7 @@ class MagiskPatcherController internal constructor(
                 FileInputStream(bootFile).use { fis ->
                     connection.pushFile(fis, bootFile.length(), remoteBootPath) { sent, total ->
                         val progress = 0.1f + (sent.toFloat() / total) * 0.4f
-                        val label = "Uploading boot image (${String.format(Locale.US, "%.1f MB", sent.toFloat() / (1024 * 1024))})..."
+                        val label = "Uploading boot image (${formatMegabytes(sent)})..."
                         _state.update { it.copy(patchPhase = PatchPhase.InProgress(progress, label)) }
                     }
                 }
@@ -455,16 +382,9 @@ class MagiskPatcherController internal constructor(
                 addPatchLog("Pushing Magisk components...", "INFO")
                 _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.5f, "Pushing Magisk binaries...")) }
 
-                val componentsDir = File(cacheDirProvider(), "magisk_components")
                 val extractedFiles = cachedComponents
                     .takeIf { it.isNotEmpty() && it.values.all(File::exists) }
-                    ?: run {
-                        componentsDir.deleteRecursively()
-                        componentsDir.mkdirs()
-                        MagiskPatcherHelper.extractMagiskComponents(apkFile, componentsDir).also {
-                            cachedComponents = it
-                        }
-                    }
+                    ?: extractMagiskComponentsFresh(apkFile)
 
                 val totalComp = extractedFiles.size
                 var compIdx = 0
@@ -505,7 +425,7 @@ class MagiskPatcherController internal constructor(
                         destination = patchedFile,
                         maxBytes = MAX_BOOT_IMAGE_BYTES
                     ) { received ->
-                        val label = "Pulling patched image (${String.format(Locale.US, "%.1f MB", received.toFloat() / (1024 * 1024))})..."
+                        val label = "Pulling patched image (${formatMegabytes(received)})..."
                         _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.85f, label)) }
                     }
                     MagiskPatcherHelper.validateBootImageForPartition(
@@ -517,11 +437,7 @@ class MagiskPatcherController internal constructor(
                     throw e
                 }
 
-                _state.value.patchedFile?.let { oldPatched ->
-                    if (oldPatched.absolutePath != patchedFile.absolutePath) {
-                        oldPatched.delete()
-                    }
-                }
+                deleteIfReplaced(_state.value.patchedFile, patchedFile)
 
                 addPatchLog("Cleaning staging area...", "INFO")
                 _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.95f, "Cleaning up...")) }
@@ -547,9 +463,9 @@ class MagiskPatcherController internal constructor(
     }
 
     fun rebootToBootloader() {
-        if (rebootJob?.isActive == true) return
+        if (isJobActive(JobSlot.REBOOT)) return
         val connection = connectionProvider()?.takeIf { it.supportsFastboot } ?: return
-        rebootJob = scope.launch(ioDispatcher) {
+        launchJob(JobSlot.REBOOT) {
             try {
                 connection.runShellCommand("reboot bootloader")
             } catch (e: CancellationException) {
@@ -562,7 +478,7 @@ class MagiskPatcherController internal constructor(
     }
 
     fun flashPatchedImage() {
-        if (flashJob?.isActive == true) return
+        if (isJobActive(JobSlot.FLASH)) return
         val connection = connectionProvider()?.takeIf { it.supportsFastboot } ?: return
         val currentState = _state.value
         if (currentState.flashPhase == FlashPhase.Flashing) return
@@ -573,46 +489,37 @@ class MagiskPatcherController internal constructor(
         _state.update { it.copy(flashPhase = FlashPhase.Flashing) }
         addPatchLog("Writing patched image to $targetPartition...", "INFO")
 
-        flashJob = scope.launch(ioDispatcher) {
+        val slot = deviceData.currentSlot
+        val candidatePartitions = listOfNotNull(
+            targetPartition,
+            "$targetPartition$slot".takeIf { slot.isNotEmpty() && !targetPartition.endsWith(slot) }
+        )
+
+        launchJob(JobSlot.FLASH) {
             var flashSuccess = false
             var lastErrorMsg = ""
 
-            try {
+            for ((index, partition) in candidatePartitions.withIndex()) {
+                if (index > 0) {
+                    addPatchLog("Retrying flash with slot suffix ($partition)...", "INFO")
+                }
                 try {
                     FileInputStream(patchedFile).use { fis ->
-                        connection.flashFastbootImage(targetPartition, fis, patchedFile.length())
+                        connection.flashFastbootImage(partition, fis, patchedFile.length())
                     }
                     flashSuccess = true
+                    break
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    lastErrorMsg = e.message ?: "Flash failed"
-                    addPatchLog("Flash to $targetPartition failed: $lastErrorMsg", "WARNING")
-                }
-
-                if (!flashSuccess) {
-                    val slot = deviceData.currentSlot
-                    if (slot.isNotEmpty() && !targetPartition.endsWith(slot)) {
-                        val slotted = "$targetPartition$slot"
-                        addPatchLog("Retrying flash with slot suffix ($slotted)...", "INFO")
-                        try {
-                            FileInputStream(patchedFile).use { fis ->
-                                connection.flashFastbootImage(slotted, fis, patchedFile.length())
-                            }
-                            flashSuccess = true
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            lastErrorMsg = e.message ?: "Slotted flash failed"
-                            addPatchLog("Slotted flash ($slotted) failed: $lastErrorMsg", "WARNING")
-                        }
+                    if (index == 0) {
+                        lastErrorMsg = e.message ?: "Flash failed"
+                        addPatchLog("Flash to $partition failed: $lastErrorMsg", "WARNING")
+                    } else {
+                        lastErrorMsg = e.message ?: "Slotted flash failed"
+                        addPatchLog("Slotted flash ($partition) failed: $lastErrorMsg", "WARNING")
                     }
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                lastErrorMsg = e.message ?: "Unknown flash error"
-                addPatchLog("Flash error: ${e.message}", "WARNING")
             }
 
             if (flashSuccess) {
@@ -627,11 +534,11 @@ class MagiskPatcherController internal constructor(
     }
 
     fun installMagiskApk() {
-        if (installApkJob?.isActive == true) return
+        if (isJobActive(JobSlot.INSTALL_APK)) return
         val connection = connectionProvider()?.takeIf { it.supportsFastboot } ?: return
         val apkFile = _state.value.magiskApkFile ?: return
 
-        installApkJob = scope.launch(ioDispatcher) {
+        launchJob(JobSlot.INSTALL_APK) {
             try {
                 FileInputStream(apkFile).use { fis ->
                     connection.pushFile(fis, apkFile.length(), "/data/local/tmp/magisk.apk")
@@ -651,6 +558,91 @@ class MagiskPatcherController internal constructor(
             }
         }
     }
+
+    private fun parseReconDeviceData(props: Map<String, String>): MagiskDeviceData {
+        val codename = props["codename"].orEmpty()
+        val buildId = props["build_id"].orEmpty()
+        val previewSdk = props["preview_sdk"]?.toIntOrNull() ?: 0
+        val buildCodename = props["build_codename"].orEmpty()
+        val abi = props["abi"].orEmpty()
+        val flashLocked = props["flash_locked"].orEmpty()
+        val vbState = props["vb_state"].orEmpty()
+
+        val resolution = MagiskPatcherHelper.resolveReconTarget(
+            codename = codename,
+            abi = abi,
+            firstApiLevelRaw = props["first_api"].orEmpty(),
+            boardApiLevelRaw = props["board_api"].orEmpty(),
+            vendorApiLevelRaw = props["vendor_api"].orEmpty()
+        )
+
+        return MagiskDeviceData(
+            codename = codename,
+            buildId = buildId,
+            apiLevel = resolution.apiLevel,
+            previewSdk = previewSdk,
+            isBeta = previewSdk > 0 || buildCodename != "REL" ||
+                buildId.contains("beta", ignoreCase = true) ||
+                buildId.contains("preview", ignoreCase = true),
+            abi = abi,
+            oemAllowed = props["oem_allowed"] == "1",
+            currentSlot = props["slot_suffix"].orEmpty(),
+            isUnlocked = flashLocked == "0" || vbState == "orange",
+            targetPartition = resolution.targetPartition
+        )
+    }
+
+    private fun copyStreamToCacheFile(
+        fileName: String,
+        budget: Long,
+        openErrorMessage: String,
+        overflowMessage: String,
+        openStream: () -> InputStream?
+    ): File {
+        val tempFile = File(cacheDirProvider(), fileName)
+        try {
+            val inputStream = openStream() ?: throw IllegalStateException(openErrorMessage)
+            inputStream.use { input ->
+                tempFile.outputStream().use { output ->
+                    copyBounded(
+                        input = input,
+                        output = output,
+                        budget = budget,
+                        overflowMessage = overflowMessage
+                    )
+                }
+            }
+            return tempFile
+        } catch (e: Throwable) {
+            tempFile.delete()
+            throw e
+        }
+    }
+
+    private fun magiskComponentsDir(): File = File(cacheDirProvider(), "magisk_components")
+
+    private fun extractMagiskComponentsFresh(apkFile: File): Map<String, File> {
+        val componentsDir = magiskComponentsDir()
+        componentsDir.deleteRecursively()
+        componentsDir.mkdirs()
+        return MagiskPatcherHelper.extractMagiskComponents(apkFile, componentsDir).also {
+            cachedComponents = it
+        }
+    }
+
+    private fun clearMagiskComponentsCache() {
+        cachedComponents = emptyMap()
+        magiskComponentsDir().deleteRecursively()
+    }
+
+    private fun deleteIfReplaced(previous: File?, current: File) {
+        if (previous != null && previous.absolutePath != current.absolutePath) {
+            previous.delete()
+        }
+    }
+
+    private fun formatMegabytes(bytes: Long): String =
+        String.format(Locale.US, "%.1f MB", bytes.toFloat() / (1024 * 1024))
 
     private fun addExtractLog(msg: String) {
         logSink(false, TAG, "[EXTRACT] $msg")
