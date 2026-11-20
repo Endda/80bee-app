@@ -256,4 +256,116 @@ class MagiskPatcherHelperTest {
         }
         assertTrue(threwNonArm64)
     }
+
+    @Test
+    fun extractBootImageFromStream_outerZipPrefersInitBootAndCleansFallback() {
+        val cache = tempFolder.newFolder("outer_cache")
+        val baos = ByteArrayOutputStream()
+        ZipOutputStream(baos).use { zos ->
+            zos.putNextEntry(ZipEntry("android-info.txt"))
+            zos.write("require board=shiba\n".toByteArray(StandardCharsets.UTF_8))
+            zos.closeEntry()
+
+            zos.putNextEntry(ZipEntry("boot.img"))
+            zos.write(buildBootHeader(kernelSize = 32768, ramdiskSize = 1024))
+            zos.closeEntry()
+
+            zos.putNextEntry(ZipEntry("init_boot.img"))
+            zos.write(buildBootHeader(kernelSize = 0, ramdiskSize = 16384))
+            zos.closeEntry()
+        }
+
+        val result = MagiskPatcherHelper.extractBootImageFromStream(
+            inputStream = ByteArrayInputStream(baos.toByteArray()),
+            cacheDir = cache,
+            targetPartition = null,
+            expectedCodename = "shiba",
+            expectedBuildId = "AP2A.240805.005",
+            sourceFileName = "shiba-ap2a.240805.005-factory-12345678.zip"
+        )
+        assertTrue(result.bootFile.exists())
+        assertTrue(result.bootFile.name.startsWith("init_boot_"))
+        assertNull(result.buildWarning)
+        assertEquals(1, cache.listFiles()?.size ?: 0)
+    }
+
+    @Test
+    fun extractBootImageFromStream_checksFactoryFilenameCodenameAndBuild() {
+        val cache = tempFolder.newFolder("filename_cache")
+        val baos = ByteArrayOutputStream()
+        ZipOutputStream(baos).use { zos ->
+            zos.putNextEntry(ZipEntry("boot.img"))
+            zos.write(buildBootHeader(kernelSize = 32768, ramdiskSize = 1024))
+            zos.closeEntry()
+        }
+        val zipBytes = baos.toByteArray()
+
+        val warningResult = MagiskPatcherHelper.extractBootImageFromStream(
+            inputStream = ByteArrayInputStream(zipBytes),
+            cacheDir = cache,
+            targetPartition = null,
+            expectedCodename = "shiba",
+            expectedBuildId = "AP3A.241005.015",
+            sourceFileName = "shiba-ap2a.240805.005-factory-12345678.zip"
+        )
+        assertTrue(warningResult.bootFile.exists())
+        assertTrue(warningResult.bootFile.name.startsWith("boot_"))
+        assertNotNull(warningResult.buildWarning)
+
+        var threwOnWrongFilenameCodename = false
+        try {
+            MagiskPatcherHelper.extractBootImageFromStream(
+                inputStream = ByteArrayInputStream(zipBytes),
+                cacheDir = cache,
+                targetPartition = null,
+                expectedCodename = "husky",
+                expectedBuildId = "AP2A.240805.005",
+                sourceFileName = "shiba-ap2a.240805.005-factory-12345678.zip"
+            )
+        } catch (e: IllegalArgumentException) {
+            threwOnWrongFilenameCodename = true
+        }
+        assertTrue(threwOnWrongFilenameCodename)
+    }
+
+    @Test
+    fun extractMagiskComponents_extractsRequiredFilesAndRejectsIncompleteApk() {
+        val cache = tempFolder.newFolder("magisk_cache")
+        val validApk = tempFolder.newFile("magisk-valid.apk")
+        ZipOutputStream(validApk.outputStream()).use { zos ->
+            val entries = listOf(
+                "assets/boot_patch.sh" to "echo patch",
+                "assets/util_functions.sh" to "echo util",
+                "assets/stub.apk" to "stub",
+                "lib/arm64-v8a/libmagiskboot.so" to "bootbin",
+                "lib/arm64-v8a/libmagiskinit.so" to "initbin",
+                "lib/arm64-v8a/libmagisk64.so" to "magisk64bin"
+            )
+            for ((path, content) in entries) {
+                zos.putNextEntry(ZipEntry(path))
+                zos.write(content.toByteArray(StandardCharsets.UTF_8))
+                zos.closeEntry()
+            }
+        }
+
+        val extracted = MagiskPatcherHelper.extractMagiskComponents(validApk, cache)
+        assertEquals(6, extracted.size)
+        assertEquals("echo patch", extracted.getValue("boot_patch.sh").readText())
+        assertEquals("magisk64bin", extracted.getValue("magisk64").readText())
+
+        val incompleteApk = tempFolder.newFile("magisk-incomplete.apk")
+        ZipOutputStream(incompleteApk.outputStream()).use { zos ->
+            zos.putNextEntry(ZipEntry("assets/boot_patch.sh"))
+            zos.write("echo patch".toByteArray(StandardCharsets.UTF_8))
+            zos.closeEntry()
+        }
+
+        var threwMissing = false
+        try {
+            MagiskPatcherHelper.extractMagiskComponents(incompleteApk, tempFolder.newFolder("magisk_incomplete"))
+        } catch (e: Exception) {
+            threwMissing = e.message?.contains("Missing required Magisk components") == true
+        }
+        assertTrue(threwMissing)
+    }
 }
