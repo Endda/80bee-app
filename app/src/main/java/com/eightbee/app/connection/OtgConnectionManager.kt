@@ -2,6 +2,7 @@ package com.eightbee.app.connection
 
 import android.content.Context
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.util.Log
@@ -19,10 +20,27 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 
-class OtgConnectionManager(
-    private val context: Context,
-    private val usbManager: UsbManager
+class OtgConnectionManager internal constructor(
+    private val filesDirProvider: () -> File,
+    private val hasUsbPermission: (UsbDevice) -> Boolean = { false },
+    private val openUsbDevice: (UsbDevice) -> UsbDeviceConnection? = { null },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cryptoProvider: (() -> AdbCrypto?)? = null,
+    private val logSink: (isError: Boolean, tag: String, message: String) -> Unit = { isError, tag, message ->
+        if (isError) Log.e(tag, message) else Log.d(tag, message)
+    },
+    initialAdbConnection: AdbConnection? = null,
+    initialFastbootClient: FastbootUsbClient? = null
 ) : ConnectionManager {
+
+    constructor(
+        context: Context,
+        usbManager: UsbManager
+    ) : this(
+        filesDirProvider = { context.filesDir },
+        hasUsbPermission = { usbManager.hasPermission(it) },
+        openUsbDevice = { usbManager.openDevice(it) }
+    )
 
     companion object {
         private const val TAG = "OtgConnectionManager"
@@ -61,18 +79,21 @@ class OtgConnectionManager(
     private val stateLock = Any()
 
     @Volatile private var connectedDevice: UsbDevice? = null
-    @Volatile private var adbConnection: AdbConnection? = null
-    @Volatile private var fastbootClient: FastbootUsbClient? = null
+    @Volatile private var adbConnection: AdbConnection? = initialAdbConnection
+    @Volatile private var fastbootClient: FastbootUsbClient? = initialFastbootClient
     @Volatile private var connectionJob: Job? = null
     @Volatile private var pendingDisconnectJob: Job? = null
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     // Load/generate the 2048-bit RSA ADB keypair off the main thread; connectDevice() awaits this.
-    private val cryptoDeferred: Deferred<AdbCrypto?> = ioScope.async { loadOrGenerateCrypto() }
+    private val cryptoDeferred: Deferred<AdbCrypto?> = ioScope.async {
+        cryptoProvider?.invoke() ?: loadOrGenerateCrypto()
+    }
 
     private fun loadOrGenerateCrypto(): AdbCrypto? {
         val base64 = AdbBase64Impl()
-        val privateKey = File(context.filesDir, "private_key")
-        val publicKey = File(context.filesDir, "public_key")
+        val filesDir = filesDirProvider()
+        val privateKey = File(filesDir, "private_key")
+        val publicKey = File(filesDir, "public_key")
 
         var crypto: AdbCrypto? = if (privateKey.exists() && publicKey.exists()) {
             try {
@@ -89,14 +110,14 @@ class OtgConnectionManager(
                 crypto = AdbCrypto.generateAdbKeyPair(base64)
                 crypto?.saveAdbKeyPair(privateKey, publicKey)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to setup crypto", e)
+                logSink(true, TAG, "Failed to setup crypto: ${e.message}")
             }
         }
         return crypto
     }
 
     fun setDevice(device: UsbDevice?): Boolean {
-        Log.d(TAG, "setDevice: $device")
+        logSink(false, TAG, "setDevice: $device")
         if (device == null) {
             disconnect()
             return false
@@ -107,12 +128,12 @@ class OtgConnectionManager(
             (current.deviceId == device.deviceId || current.deviceName == device.deviceName) &&
             _connectionState.value != ConnectionState.Disconnected
         ) {
-            Log.d(TAG, "Device ${device.deviceName} is already active/connecting; skipping reconnect")
+            logSink(false, TAG, "Device ${device.deviceName} is already active/connecting; skipping reconnect")
             return false
         }
 
-        if (usbManager.hasPermission(device)) {
-            Log.d(TAG, "Permission already granted for ${device.deviceName}")
+        if (hasUsbPermission(device)) {
+            logSink(false, TAG, "Permission already granted for ${device.deviceName}")
             if (current != null || adbConnection != null || fastbootClient != null) {
                 pendingDisconnectJob = disconnect()
             }
@@ -120,7 +141,7 @@ class OtgConnectionManager(
             connectDevice()
             return true
         } else {
-            Log.d(TAG, "Waiting for permission for ${device.deviceName}")
+            logSink(false, TAG, "Waiting for permission for ${device.deviceName}")
             return false
         }
     }
@@ -128,7 +149,7 @@ class OtgConnectionManager(
     fun onDeviceDetached(device: UsbDevice): Boolean {
         val current = connectedDevice ?: return false
         if (current.deviceId != device.deviceId && current.deviceName != device.deviceName) {
-            Log.d(TAG, "Ignoring detach for unrelated USB device ${device.deviceName}")
+            logSink(false, TAG, "Ignoring detach for unrelated USB device ${device.deviceName}")
             return false
         }
         disconnect()
@@ -137,14 +158,14 @@ class OtgConnectionManager(
 
     private fun connectDevice() {
         val device = connectedDevice ?: return
-        Log.d(TAG, "connectDevice: Starting connection process for ${device.deviceName}")
-        Log.d(TAG, "Device details: Vendor=${device.vendorId}, Product=${device.productId}, Class=${device.deviceClass}")
-        Log.d(TAG, "Configuration count: ${device.configurationCount}")
+        logSink(false, TAG, "connectDevice: Starting connection process for ${device.deviceName}")
+        logSink(false, TAG, "Device details: Vendor=${device.vendorId}, Product=${device.productId}, Class=${device.deviceClass}")
+        logSink(false, TAG, "Configuration count: ${device.configurationCount}")
 
         val (adbInterface, fastbootInterface) = findInterfaces(device)
 
         if (adbInterface == null && fastbootInterface == null) {
-            Log.e(TAG, "Aborting: No ADB or Fastboot interface found")
+            logSink(true, TAG, "Aborting: No ADB or Fastboot interface found")
             return
         }
 
@@ -153,13 +174,13 @@ class OtgConnectionManager(
 
         connectionJob = ioScope.launch {
             pendingDisconnectJob?.join()
-            var openedConnection: android.hardware.usb.UsbDeviceConnection? = null
+            var openedConnection: UsbDeviceConnection? = null
             var pendingAdb: AdbConnection? = null
             var pendingFastboot: FastbootUsbClient? = null
             var committed = false
             try {
-                val connection = usbManager.openDevice(device) ?: run {
-                    Log.e(TAG, "Failed to open USB device connection")
+                val connection = openUsbDevice(device) ?: run {
+                    logSink(true, TAG, "Failed to open USB device connection")
                     synchronized(stateLock) {
                         if (connectedDevice == device) {
                             connectedDevice = null
@@ -176,7 +197,7 @@ class OtgConnectionManager(
 
                 if (adbInterface != null) {
                     val crypto = cryptoDeferred.await() ?: run {
-                        Log.e(TAG, "AdbCrypto not initialized")
+                        logSink(true, TAG, "AdbCrypto not initialized")
                         synchronized(stateLock) {
                             if (connectedDevice == device) {
                                 connectedDevice = null
@@ -200,7 +221,7 @@ class OtgConnectionManager(
                         }
                     }
                     if (committed) {
-                        Log.d(TAG, "ADB Connection successful for ${device.deviceName}")
+                        logSink(false, TAG, "ADB Connection successful for ${device.deviceName}")
                     }
                 } else if (fastbootInterface != null) {
                     val client = FastbootUsbClient(fastbootInterface, connection)
@@ -214,13 +235,13 @@ class OtgConnectionManager(
                         }
                     }
                     if (committed) {
-                        Log.d(TAG, "Fastboot Connection successful for ${device.deviceName}")
+                        logSink(false, TAG, "Fastboot Connection successful for ${device.deviceName}")
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Connection failed for ${device.deviceName}", e)
+                logSink(true, TAG, "Connection failed for ${device.deviceName}: ${e.message}")
                 disconnect()
             } finally {
                 if (!committed) {
@@ -324,7 +345,7 @@ class OtgConnectionManager(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error writing stream input", e)
+                    logSink(true, TAG, "Error writing stream input: ${e.message}")
                 }
             }
 
@@ -433,7 +454,7 @@ class OtgConnectionManager(
         val quotedPath = quoteRemoteShellPath(remotePath)
         var stream: AdbStream? = null
         try {
-            Log.d(TAG, "pushFile: Opening stream to dd of=$quotedPath status=none...")
+            logSink(false, TAG, "pushFile: Opening stream to dd of=$quotedPath status=none...")
             stream = connection.open("exec:dd of=$quotedPath status=none")
             val currentStream = stream
             var sent = 0L
@@ -466,7 +487,7 @@ class OtgConnectionManager(
             if (remoteSize != size) {
                 throw IOException("Push size verification failed for $remotePath: expected $size bytes, got ${remoteSize ?: "unknown"}")
             }
-            Log.d(TAG, "pushFile: Verified $size bytes written to $remotePath")
+            logSink(false, TAG, "pushFile: Verified $size bytes written to $remotePath")
         } finally {
             try {
                 stream?.close()
