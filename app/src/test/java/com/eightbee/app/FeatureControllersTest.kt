@@ -493,11 +493,13 @@ class FeatureControllersTest {
 
         controller.executeInstall(
             config = config,
-            bypassLowTargetSdk = true,
-            grantAllPermissions = true,
-            allowDowngrade = true,
-            testOnly = true,
-            installToSdCard = true
+            options = SideloadInstallOptions(
+                bypassLowTargetSdk = true,
+                grantAllPermissions = true,
+                allowDowngrade = true,
+                testOnly = true,
+                installToSdCard = true
+            )
         )
 
         assertEquals(SideloadState.Success("Test App"), controller.state.value)
@@ -525,7 +527,7 @@ class FeatureControllersTest {
             connectionProvider = { unavailableConn },
             ioDispatcher = Dispatchers.Unconfined
         )
-        unavailableController.executeInstall(unavailableConfig, false, false, false, false, false)
+        unavailableController.executeInstall(unavailableConfig)
         assertEquals(
             SideloadState.Error("Device connection not active or unauthorized.", InstallStep.CHECK_CONNECTION),
             unavailableController.state.value
@@ -539,7 +541,7 @@ class FeatureControllersTest {
             connectionProvider = { badSessionConn },
             ioDispatcher = Dispatchers.Unconfined
         )
-        badSessionController.executeInstall(badSessionConfig, false, false, false, false, false)
+        badSessionController.executeInstall(badSessionConfig)
         assertEquals(
             SideloadState.Error("Could not parse session ID from: Success: no id here", InstallStep.CREATE_SESSION),
             badSessionController.state.value
@@ -553,7 +555,7 @@ class FeatureControllersTest {
             connectionProvider = { throwingCreateConn },
             ioDispatcher = Dispatchers.Unconfined
         )
-        throwingCreateController.executeInstall(throwingCreateConfig, false, false, false, false, false)
+        throwingCreateController.executeInstall(throwingCreateConfig)
         assertEquals(
             SideloadState.Error("Failed to create install session: link down", InstallStep.CREATE_SESSION),
             throwingCreateController.state.value
@@ -575,7 +577,7 @@ class FeatureControllersTest {
             connectionProvider = { streamFailConn },
             ioDispatcher = Dispatchers.Unconfined
         )
-        streamFailController.executeInstall(streamFailConfig, false, false, false, false, false)
+        streamFailController.executeInstall(streamFailConfig)
         assertEquals(
             SideloadState.Error(
                 "Failed to write base.apk: Failure [INSTALL_FAILED_INVALID_APK]",
@@ -602,7 +604,7 @@ class FeatureControllersTest {
             connectionProvider = { commitBlankConn },
             ioDispatcher = Dispatchers.Unconfined
         )
-        commitBlankController.executeInstall(commitBlankConfig, false, false, false, false, false)
+        commitBlankController.executeInstall(commitBlankConfig)
         assertEquals(
             SideloadState.Error(
                 "Installation failed: No response received from package manager.",

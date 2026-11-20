@@ -1,5 +1,6 @@
 package com.eightbee.app.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -25,10 +26,74 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.InstallStep
 import com.eightbee.app.R
+import com.eightbee.app.SideloadInstallOptions
 import com.eightbee.app.SideloadState
 import com.eightbee.app.features.SideloadController
 import com.eightbee.app.ui.theme.SuccessGreen
 import java.util.Locale
+
+private data class SideloadOptionSpec(
+    @param:StringRes @get:StringRes val titleRes: Int,
+    val descriptionRes: (isTargetAndroid14OrHigher: Boolean) -> Int,
+    val isChecked: (SideloadInstallOptions) -> Boolean,
+    val isEnabled: (isTargetAndroid14OrHigher: Boolean) -> Boolean = { true },
+    val onCheckedChange: ((SideloadInstallOptions, Boolean) -> SideloadInstallOptions)? = null
+)
+
+private val PRIMARY_SIDELOAD_OPTIONS = listOf(
+    SideloadOptionSpec(
+        titleRes = R.string.sideload_opt_replace_title,
+        descriptionRes = { R.string.sideload_opt_replace_desc },
+        isChecked = { true },
+        isEnabled = { false },
+        onCheckedChange = null
+    ),
+    SideloadOptionSpec(
+        titleRes = R.string.sideload_opt_bypass_sdk_title,
+        descriptionRes = { isAndroid14Plus ->
+            if (isAndroid14Plus) R.string.sideload_opt_bypass_sdk_supported
+            else R.string.sideload_opt_bypass_sdk_unsupported
+        },
+        isChecked = { it.bypassLowTargetSdk },
+        isEnabled = { isAndroid14Plus -> isAndroid14Plus },
+        onCheckedChange = { opts, checked -> opts.copy(bypassLowTargetSdk = checked) }
+    ),
+    SideloadOptionSpec(
+        titleRes = R.string.sideload_opt_grant_title,
+        descriptionRes = { R.string.sideload_opt_grant_desc },
+        isChecked = { it.grantAllPermissions },
+        onCheckedChange = { opts, checked -> opts.copy(grantAllPermissions = checked) }
+    )
+)
+
+private val ADVANCED_SIDELOAD_OPTIONS = listOf(
+    SideloadOptionSpec(
+        titleRes = R.string.sideload_opt_downgrade_title,
+        descriptionRes = { R.string.sideload_opt_downgrade_desc },
+        isChecked = { it.allowDowngrade },
+        onCheckedChange = { opts, checked -> opts.copy(allowDowngrade = checked) }
+    ),
+    SideloadOptionSpec(
+        titleRes = R.string.sideload_opt_test_title,
+        descriptionRes = { R.string.sideload_opt_test_desc },
+        isChecked = { it.testOnly },
+        onCheckedChange = { opts, checked -> opts.copy(testOnly = checked) }
+    ),
+    SideloadOptionSpec(
+        titleRes = R.string.sideload_opt_sdcard_title,
+        descriptionRes = { R.string.sideload_opt_sdcard_desc },
+        isChecked = { it.installToSdCard },
+        onCheckedChange = { opts, checked -> opts.copy(installToSdCard = checked) }
+    )
+)
+
+private val SIDELOAD_TROUBLESHOOTING_TIPS = listOf(
+    R.string.sideload_tip_1,
+    R.string.sideload_tip_2,
+    R.string.sideload_tip_3,
+    R.string.sideload_tip_4,
+    R.string.sideload_tip_5
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,14 +102,17 @@ fun SideloadBottomSheet(
     onDismiss: () -> Unit
 ) {
     val sideloadState by controller.state.collectAsState()
+    val dismissAndClear = {
+        controller.clear()
+        onDismiss()
+    }
 
     ModalBottomSheet(
         onDismissRequest = {
             if (sideloadState !is SideloadState.Installing &&
                 sideloadState !is SideloadState.CopyingAndParsing
             ) {
-                controller.clear()
-                onDismiss()
+                dismissAndClear()
             }
         },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -67,43 +135,18 @@ fun SideloadBottomSheet(
                 is SideloadState.ConfigReady -> {
                     ConfigView(
                         config = state,
-                        onInstall = { bypassLowSdk, grantPerms, allowDowngrade, testOnly, sdCard ->
-                            controller.executeInstall(
-                                config = state,
-                                bypassLowTargetSdk = bypassLowSdk,
-                                grantAllPermissions = grantPerms,
-                                allowDowngrade = allowDowngrade,
-                                testOnly = testOnly,
-                                installToSdCard = sdCard
-                            )
-                        },
-                        onCancel = {
-                            controller.clear()
-                            onDismiss()
-                        }
+                        onInstall = { options -> controller.executeInstall(state, options) },
+                        onCancel = dismissAndClear
                     )
                 }
                 is SideloadState.Installing -> {
                     InstallingView(state = state)
                 }
                 is SideloadState.Success -> {
-                    SuccessView(
-                        appLabel = state.appLabel,
-                        onDismiss = {
-                            controller.clear()
-                            onDismiss()
-                        }
-                    )
+                    SuccessView(appLabel = state.appLabel, onDismiss = dismissAndClear)
                 }
                 is SideloadState.Error -> {
-                    ErrorView(
-                        message = state.message,
-                        step = state.step,
-                        onDismiss = {
-                            controller.clear()
-                            onDismiss()
-                        }
-                    )
+                    ErrorView(message = state.message, step = state.step, onDismiss = dismissAndClear)
                 }
             }
         }
@@ -131,20 +174,15 @@ fun ParsingView() {
 }
 
 @Composable
-fun ConfigView(
+private fun ConfigView(
     config: SideloadState.ConfigReady,
-    onInstall: (Boolean, Boolean, Boolean, Boolean, Boolean) -> Unit,
+    onInstall: (SideloadInstallOptions) -> Unit,
     onCancel: () -> Unit
 ) {
     val isTargetAndroid14OrHigher = config.targetDeviceSdk >= 34
-    var bypassLowTargetSdk by remember(config.targetDeviceSdk) {
-        mutableStateOf(isTargetAndroid14OrHigher)
+    var options by remember(config.targetDeviceSdk) {
+        mutableStateOf(SideloadInstallOptions(bypassLowTargetSdk = isTargetAndroid14OrHigher))
     }
-
-    var grantAllPermissions by remember { mutableStateOf(false) }
-    var allowDowngrade by remember { mutableStateOf(false) }
-    var testOnly by remember { mutableStateOf(false) }
-    var installToSdCard by remember { mutableStateOf(false) }
     var advancedExpanded by remember { mutableStateOf(false) }
 
     Row(
@@ -240,66 +278,12 @@ fun ConfigView(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(checked = true, onCheckedChange = null, enabled = false)
-        Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(stringResource(R.string.sideload_opt_replace_title), style = MaterialTheme.typography.bodyLarge)
-            Text(
-                stringResource(R.string.sideload_opt_replace_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(
-            checked = bypassLowTargetSdk,
-            onCheckedChange = { if (isTargetAndroid14OrHigher) bypassLowTargetSdk = it },
-            enabled = isTargetAndroid14OrHigher
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(stringResource(R.string.sideload_opt_bypass_sdk_title), style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = stringResource(
-                    if (isTargetAndroid14OrHigher) R.string.sideload_opt_bypass_sdk_supported
-                    else R.string.sideload_opt_bypass_sdk_unsupported
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(checked = grantAllPermissions, onCheckedChange = { grantAllPermissions = it })
-        Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(stringResource(R.string.sideload_opt_grant_title), style = MaterialTheme.typography.bodyLarge)
-            Text(
-                stringResource(R.string.sideload_opt_grant_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
+    SideloadOptionGroup(
+        specs = PRIMARY_SIDELOAD_OPTIONS,
+        options = options,
+        isTargetAndroid14OrHigher = isTargetAndroid14OrHigher,
+        onOptionsChange = { options = it }
+    )
 
     Spacer(modifier = Modifier.height(8.dp))
     TextButton(
@@ -318,61 +302,13 @@ fun ConfigView(
     }
 
     AnimatedVisibility(visible = advancedExpanded) {
-        Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(checked = allowDowngrade, onCheckedChange = { allowDowngrade = it })
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(stringResource(R.string.sideload_opt_downgrade_title), style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        stringResource(R.string.sideload_opt_downgrade_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(checked = testOnly, onCheckedChange = { testOnly = it })
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(stringResource(R.string.sideload_opt_test_title), style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        stringResource(R.string.sideload_opt_test_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(checked = installToSdCard, onCheckedChange = { installToSdCard = it })
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(stringResource(R.string.sideload_opt_sdcard_title), style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        stringResource(R.string.sideload_opt_sdcard_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
+        SideloadOptionGroup(
+            specs = ADVANCED_SIDELOAD_OPTIONS,
+            options = options,
+            isTargetAndroid14OrHigher = isTargetAndroid14OrHigher,
+            onOptionsChange = { options = it },
+            modifier = Modifier.padding(start = 16.dp)
+        )
     }
 
     Spacer(modifier = Modifier.height(24.dp))
@@ -387,16 +323,71 @@ fun ConfigView(
         Button(
             onClick = {
                 onInstall(
-                    bypassLowTargetSdk && isTargetAndroid14OrHigher,
-                    grantAllPermissions,
-                    allowDowngrade,
-                    testOnly,
-                    installToSdCard
+                    options.copy(
+                        bypassLowTargetSdk = options.bypassLowTargetSdk && isTargetAndroid14OrHigher
+                    )
                 )
             },
             modifier = Modifier.weight(1f)
         ) {
             Text(stringResource(R.string.sideload_install_button))
+        }
+    }
+}
+
+@Composable
+private fun SideloadOptionGroup(
+    specs: List<SideloadOptionSpec>,
+    options: SideloadInstallOptions,
+    isTargetAndroid14OrHigher: Boolean,
+    onOptionsChange: (SideloadInstallOptions) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        specs.forEach { spec ->
+            val enabled = spec.isEnabled(isTargetAndroid14OrHigher)
+            SideloadOptionRow(
+                title = stringResource(spec.titleRes),
+                description = stringResource(spec.descriptionRes(isTargetAndroid14OrHigher)),
+                checked = spec.isChecked(options),
+                enabled = enabled,
+                onCheckedChange = spec.onCheckedChange?.let { update ->
+                    { checked ->
+                        if (enabled) onOptionsChange(update(options, checked))
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SideloadOptionRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -549,11 +540,9 @@ fun ErrorView(message: String, step: InstallStep, onDismiss: () -> Unit) {
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(8.dp))
-        BulletItem(stringResource(R.string.sideload_tip_1))
-        BulletItem(stringResource(R.string.sideload_tip_2))
-        BulletItem(stringResource(R.string.sideload_tip_3))
-        BulletItem(stringResource(R.string.sideload_tip_4))
-        BulletItem(stringResource(R.string.sideload_tip_5))
+        SIDELOAD_TROUBLESHOOTING_TIPS.forEach { tipRes ->
+            BulletItem(stringResource(tipRes))
+        }
     }
 
     Button(
