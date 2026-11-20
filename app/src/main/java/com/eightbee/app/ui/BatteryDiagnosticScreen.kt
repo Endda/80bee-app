@@ -5,12 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,8 +20,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.eightbee.app.BackgroundOperationService
-import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
+import com.eightbee.app.features.DeviceTweaksController
 
 @Composable
 internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -> Unit {
@@ -48,56 +44,26 @@ internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
+fun BatteryDiagnosticScreen(controller: DeviceTweaksController, onBack: () -> Unit) {
     val isMonitoring by BackgroundOperationService.isMonitoringBattery.collectAsState()
     val telemetryText by BackgroundOperationService.batteryTelemetry.collectAsState()
     val startMonitoringWithPermission = rememberNotificationPermissionLauncher {
-        viewModel.startBatteryMonitoring()
+        controller.startBatteryMonitoring()
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.battery_diag_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back)
-                        )
-                    }
-                }
-            )
-        }
-    ) { paddingValues ->
+    ToolScreenScaffold(
+        title = stringResource(R.string.battery_diag_title),
+        onBack = onBack
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            OutlinedCard(
-                modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = stringResource(R.string.battery_diag_card_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.battery_diag_card_desc),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            ToolIntroCard(
+                title = stringResource(R.string.battery_diag_card_title),
+                description = stringResource(R.string.battery_diag_card_desc)
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -117,7 +83,7 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 Button(
                     onClick = {
                         if (isMonitoring) {
-                            viewModel.stopBatteryMonitoring()
+                            controller.stopBatteryMonitoring()
                         } else {
                             startMonitoringWithPermission()
                         }
@@ -179,13 +145,13 @@ fun BatteryDiagnosticScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilledTonalButton(
-                        onClick = { viewModel.simulateBatteryUnplug() },
+                        onClick = { controller.simulateBatteryUnplug() },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(stringResource(R.string.battery_diag_simulate_unplug))
                     }
                     Button(
-                        onClick = { viewModel.resetBatterySimulation() },
+                        onClick = { controller.resetBatterySimulation() },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(stringResource(R.string.battery_diag_reset_charging))

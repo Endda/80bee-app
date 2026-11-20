@@ -18,7 +18,7 @@ sealed class BootloaderWizardState {
     data class CommandSelection(
         val isUnlock: Boolean,
         val commandOptions: List<String>,
-        val customCommand: String = ""
+        val validationError: String? = null
     ) : BootloaderWizardState()
     
     data class ConfirmingExecution(

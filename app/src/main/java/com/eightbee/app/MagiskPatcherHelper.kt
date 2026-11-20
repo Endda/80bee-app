@@ -1,6 +1,7 @@
 package com.eightbee.app
 
 import android.util.Log
+import com.eightbee.app.features.MAX_BOOT_IMAGE_BYTES
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -35,7 +36,6 @@ object MagiskPatcherHelper {
     private val ANDROID_BOOT_MAGIC = "ANDROID!".toByteArray(StandardCharsets.US_ASCII)
     private const val BOOT_HEADER_PROBE_SIZE = 64
     private const val MAX_ANDROID_INFO_BYTES = 64 * 1024
-    private const val MAX_BOOT_IMAGE_BYTES = 512L * 1024 * 1024
     private const val MAX_MAGISK_COMPONENT_BYTES = 128L * 1024 * 1024
     private val PIXEL_6_SERIES = setOf("oriole", "raven", "bluejay")
 

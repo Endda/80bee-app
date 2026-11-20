@@ -19,14 +19,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
+import com.eightbee.app.ReconPhase
+import com.eightbee.app.features.MagiskPatcherController
 import com.eightbee.app.ui.theme.StatusError
 import com.eightbee.app.ui.theme.SuccessGreen
 
 @Composable
-internal fun StepConnectionRecon(viewModel: MainViewModel, state: PixelMagiskPatcherState) {
+internal fun StepConnectionRecon(controller: MagiskPatcherController, state: PixelMagiskPatcherState) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -77,9 +78,9 @@ internal fun StepConnectionRecon(viewModel: MainViewModel, state: PixelMagiskPat
             }
         }
 
-        if (state.integrityStatus.startsWith("RECON_FAILED")) {
-            val errorMsg = state.integrityStatus.substringAfter("RECON_FAILED:").trim()
-            val displayMsg = errorMsg.ifEmpty { stringResource(R.string.patcher_recon_failed_default) }
+        val reconPhase = state.reconPhase
+        if (reconPhase is ReconPhase.Failed) {
+            val displayMsg = reconPhase.message.ifBlank { stringResource(R.string.patcher_recon_failed_default) }
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                 modifier = Modifier.fillMaxWidth()
@@ -110,14 +111,15 @@ internal fun StepConnectionRecon(viewModel: MainViewModel, state: PixelMagiskPat
             modifier = Modifier.size(72.dp)
         )
 
+        val isReconning = reconPhase is ReconPhase.InProgress
         Button(
-            onClick = { viewModel.startMagiskRecon() },
-            enabled = !state.isReconning,
+            onClick = { controller.startRecon() },
+            enabled = !isReconning,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
         ) {
-            if (state.isReconning) {
+            if (isReconning) {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
             } else {
                 Text(stringResource(R.string.patcher_recon_button))

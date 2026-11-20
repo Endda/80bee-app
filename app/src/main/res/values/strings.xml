@@ -195,6 +195,41 @@
     <string name="bootloader_relock_title">Relock Bootloader</string>
     <string name="bootloader_relock_desc">Locks the bootloader back to stock parameters. Ensure you have stock firmware partitions flashed first to avoid hard-bricking.</string>
     <string name="bootloader_lock_button">Lock Bootloader</string>
+    <string name="bootloader_tools_header">Additional Fastboot Tools</string>
+    <string name="bootloader_tools_fastboot_ready">USB OTG Fastboot connected — curated diagnostics and slot tools ready.</string>
+    <string name="bootloader_tools_fastboot_waiting">Connect target device in Bootloader / Fastboot mode over USB OTG to run these tools.</string>
+    <string name="bootloader_tools_cat_diagnostic">Read-Only Diagnostics</string>
+    <string name="bootloader_tools_cat_reboot">Safe Reboot Targets</string>
+    <string name="bootloader_tools_cat_slot_oem">Gated Slot &amp; OEM Controls</string>
+    <string name="bootloader_tools_run_button">Run</string>
+    <string name="bootloader_tools_confirm_title">Confirm Fastboot State Change</string>
+    <string name="bootloader_tools_confirm_body_format">Execute `%1$s` on the connected Fastboot device?\n\n%2$s</string>
+    <string name="bootloader_tools_confirm_button">Execute Command</string>
+    <string name="bootloader_tools_log_header">Fastboot Output Log</string>
+    <string name="bootloader_tools_log_empty">Run any Fastboot tool above to inspect INFO / OKAY / FAIL responses.</string>
+    <string name="bootloader_tools_clear_log">Clear</string>
+    <string name="bootloader_tool_getvar_all_title">Read All Variables (`getvar all`)</string>
+    <string name="bootloader_tool_getvar_all_desc">Dumps bootloader version, baseband, slot count, lock state, and partition info.</string>
+    <string name="bootloader_tool_getvar_slot_title">Check Active Slot (`getvar current-slot`)</string>
+    <string name="bootloader_tool_getvar_slot_desc">Displays the currently active A/B boot slot.</string>
+    <string name="bootloader_tool_getvar_unlocked_title">Check Lock State (`getvar unlocked`)</string>
+    <string name="bootloader_tool_getvar_unlocked_desc">Queries whether the bootloader reports unlocked=yes or no.</string>
+    <string name="bootloader_tool_getvar_userspace_title">Check Fastbootd (`getvar is-userspace`)</string>
+    <string name="bootloader_tool_getvar_userspace_desc">Checks whether the device is in userspace fastbootd (yes) or bootloader fastboot (no).</string>
+    <string name="bootloader_tool_reboot_bootloader_title">Reboot Bootloader (`reboot-bootloader`)</string>
+    <string name="bootloader_tool_reboot_bootloader_desc">Restarts cleanly back into hardware bootloader mode.</string>
+    <string name="bootloader_tool_reboot_fastbootd_title">Reboot Fastbootd (`reboot-fastboot`)</string>
+    <string name="bootloader_tool_reboot_fastbootd_desc">Reboots into userspace fastbootd for dynamic partition inspection.</string>
+    <string name="bootloader_tool_reboot_recovery_title">Reboot Recovery (`reboot-recovery`)</string>
+    <string name="bootloader_tool_reboot_recovery_desc">Exits fastboot and boots directly into recovery mode.</string>
+    <string name="bootloader_tool_reboot_system_title">Reboot System (`reboot`)</string>
+    <string name="bootloader_tool_reboot_system_desc">Exits fastboot and boots Android normally.</string>
+    <string name="bootloader_tool_slot_a_title">Set Active Slot A (`set_active a`)</string>
+    <string name="bootloader_tool_slot_a_desc">Switches active boot slot to A. Ensure slot A contains a valid bootable image to avoid bootloops.</string>
+    <string name="bootloader_tool_slot_b_title">Set Active Slot B (`set_active b`)</string>
+    <string name="bootloader_tool_slot_b_desc">Switches active boot slot to B. Ensure slot B contains a valid bootable image to avoid bootloops.</string>
+    <string name="bootloader_tool_oem_info_title">OEM Device Info (`oem device-info`)</string>
+    <string name="bootloader_tool_oem_info_desc">Queries vendor tamper/unlock flags. Only supported on select Qualcomm/Pixel bootloaders.</string>
     <string name="wizard_op_unlock_full">Unlock Bootloader</string>
     <string name="wizard_op_relock_full">Relock Bootloader</string>
     <string name="wizard_op_unlock_short">Unlock</string>
@@ -313,6 +348,10 @@
     <string name="debloater_uninstall_selected">Uninstall Selected</string>
     <string name="debloater_disable_selected">Disable Selected</string>
     <string name="debloater_cd_risk_warning">Risk warning</string>
+    <string name="debloater_badge_disabled">Disabled</string>
+    <string name="debloater_hide_disabled">Hide disabled</string>
+    <string name="debloater_restore_disabled_format">Restore Disabled (%1$d)</string>
+    <string name="debloater_all_hidden_by_filter">All matching packages are disabled and currently hidden.</string>
 
     <!-- Private DNS Manager -->
     <string name="dns_title">Private DNS Manager</string>

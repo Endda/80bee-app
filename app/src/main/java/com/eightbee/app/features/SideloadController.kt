@@ -127,6 +127,15 @@ class SideloadController(
                     null
                 }
 
+                val targetDeviceSdk = runCatching {
+                    connectionProvider()
+                        ?.takeIf { it.isAvailable() }
+                        ?.runShellCommand("getprop ro.build.version.sdk")
+                        ?.trim()
+                        ?.toIntOrNull()
+                        ?: 0
+                }.getOrDefault(0)
+
                 _state.value = SideloadState.ConfigReady(
                     appLabel = appLabel,
                     packageName = packageName,
@@ -135,7 +144,8 @@ class SideloadController(
                     totalSize = tempFiles.sumOf { it.length() },
                     apkFiles = tempFiles,
                     isArchive = isArchive,
-                    archiveName = fileName
+                    archiveName = fileName,
+                    targetDeviceSdk = targetDeviceSdk
                 )
             } catch (e: CancellationException) {
                 tempFiles.forEach { it.delete() }
@@ -184,7 +194,19 @@ class SideloadController(
                 if (installToSdCard) append(" -s")
             }
 
-            val createResult = connection.runShellCommand(installCmd)
+            val createResult = try {
+                connection.runShellCommand(installCmd)
+            } catch (e: CancellationException) {
+                config.apkFiles.forEach { it.delete() }
+                throw e
+            } catch (e: Exception) {
+                _state.value = SideloadState.Error(
+                    "Failed to create install session: ${e.message ?: "Connection error"}",
+                    InstallStep.CREATE_SESSION
+                )
+                config.apkFiles.forEach { it.delete() }
+                return@launch
+            }
             if (!createResult.contains("Success", ignoreCase = true)) {
                 _state.value = SideloadState.Error("Failed to create install session: $createResult", InstallStep.CREATE_SESSION)
                 config.apkFiles.forEach { it.delete() }
@@ -227,7 +249,19 @@ class SideloadController(
             }
 
             _state.value = SideloadState.Installing(InstallStep.COMMIT_INSTALL, completedSteps.toSet())
-            val commitResult = connection.runShellCommand("cmd package install-commit $sessionId")
+            val commitResult = try {
+                connection.runShellCommand("cmd package install-commit $sessionId")
+            } catch (e: CancellationException) {
+                config.apkFiles.forEach { it.delete() }
+                throw e
+            } catch (e: Exception) {
+                config.apkFiles.forEach { it.delete() }
+                _state.value = SideloadState.Error(
+                    "Installation failed: ${e.message ?: "Connection error"}",
+                    InstallStep.COMMIT_INSTALL
+                )
+                return@launch
+            }
             config.apkFiles.forEach { it.delete() }
 
             if (commitResult.contains("Success", ignoreCase = true)) {

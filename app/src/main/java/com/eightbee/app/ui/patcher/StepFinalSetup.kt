@@ -16,14 +16,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
+import com.eightbee.app.features.MagiskPatcherController
 import com.eightbee.app.ui.theme.SuccessGreen
 import com.eightbee.app.ui.theme.SuccessGreenLight
 
 @Composable
-internal fun StepFinalSetup(viewModel: MainViewModel, state: PixelMagiskPatcherState, onDismiss: () -> Unit) {
+internal fun StepFinalSetup(controller: MagiskPatcherController, state: PixelMagiskPatcherState, onDismiss: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -70,7 +70,7 @@ internal fun StepFinalSetup(viewModel: MainViewModel, state: PixelMagiskPatcherS
                 StepInstructionRow(number = 3, text = stringResource(R.string.patcher_final_step3))
 
                 Button(
-                    onClick = { viewModel.installMagiskApkFromPatcher() },
+                    onClick = { controller.installMagiskApk() },
                     enabled = !state.finalApkInstalled,
                     modifier = Modifier.fillMaxWidth()
                 ) {

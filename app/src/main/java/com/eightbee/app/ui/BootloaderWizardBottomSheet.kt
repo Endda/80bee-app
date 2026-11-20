@@ -17,39 +17,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.BootloaderWizardState
-import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
+import com.eightbee.app.connection.ConnectionManager
 import com.eightbee.app.connection.ConnectionState
-import com.eightbee.app.connection.OtgConnectionManager
+import com.eightbee.app.features.BootloaderWizardController
+import com.eightbee.app.features.FastbootCommandPolicy
+import com.eightbee.app.features.FastbootValidationResult
 import com.eightbee.app.ui.theme.SuccessGreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BootloaderWizardBottomSheet(
-    viewModel: MainViewModel,
+    controller: BootloaderWizardController,
+    activeConnection: ConnectionManager?,
     onDismiss: () -> Unit
 ) {
-    val wizardState by viewModel.bootloaderWizardState.collectAsState()
-    val activeConnection by viewModel.activeConnection.collectAsState()
+    val wizardState by controller.state.collectAsState()
 
-    val connectionState = if (activeConnection is OtgConnectionManager) {
-        (activeConnection as OtgConnectionManager).connectionState.collectAsState().value
-    } else {
-        ConnectionState.Disconnected
-    }
+    val connectionState = activeConnection?.connectionState?.collectAsState()?.value
+        ?: ConnectionState.Disconnected
 
     LaunchedEffect(connectionState, wizardState) {
         if (connectionState == ConnectionState.FastbootConnected &&
             wizardState is BootloaderWizardState.WaitingForFastboot
         ) {
-            viewModel.transitionToCommandSelection()
+            controller.transitionToCommandSelection()
         }
     }
 
     ModalBottomSheet(
         onDismissRequest = {
             if (wizardState !is BootloaderWizardState.ExecutingCommand) {
-                viewModel.clearBootloaderWizardState()
+                controller.clear()
                 onDismiss()
             }
         },
@@ -70,9 +69,9 @@ fun BootloaderWizardBottomSheet(
                 is BootloaderWizardState.ConfirmingWarnings -> {
                     ConfirmingWarningsView(
                         isUnlock = state.isUnlock,
-                        onProceed = { viewModel.proceedFromWarnings() },
+                        onProceed = { controller.proceedFromWarnings() },
                         onCancel = {
-                            viewModel.clearBootloaderWizardState()
+                            controller.clear()
                             onDismiss()
                         }
                     )
@@ -87,9 +86,10 @@ fun BootloaderWizardBottomSheet(
                     CommandSelectionView(
                         isUnlock = state.isUnlock,
                         presetOptions = state.commandOptions,
-                        onProceed = { command -> viewModel.proceedFromCommandSelection(command) },
+                        controllerError = state.validationError,
+                        onProceed = { command -> controller.proceedFromCommandSelection(command) },
                         onCancel = {
-                            viewModel.clearBootloaderWizardState()
+                            controller.clear()
                             onDismiss()
                         }
                     )
@@ -98,8 +98,8 @@ fun BootloaderWizardBottomSheet(
                     ConfirmingExecutionView(
                         isUnlock = state.isUnlock,
                         command = state.command,
-                        onProceed = { viewModel.confirmAndExecuteBootloaderCommand() },
-                        onBack = { viewModel.goBackToCommandSelection() }
+                        onProceed = { controller.confirmAndExecute() },
+                        onBack = { controller.goBackToCommandSelection() }
                     )
                 }
                 is BootloaderWizardState.ExecutingCommand -> {
@@ -108,7 +108,7 @@ fun BootloaderWizardBottomSheet(
                 is BootloaderWizardState.PhysicalConfirmationPrompt -> {
                     PhysicalConfirmationPromptView(
                         isUnlock = state.isUnlock,
-                        onConfirmed = { viewModel.completePhysicalConfirmation() }
+                        onConfirmed = { controller.completePhysicalConfirmation() }
                     )
                 }
                 is BootloaderWizardState.Finished -> {
@@ -117,7 +117,7 @@ fun BootloaderWizardBottomSheet(
                         success = state.success,
                         message = state.message,
                         onClose = {
-                            viewModel.clearBootloaderWizardState()
+                            controller.clear()
                             onDismiss()
                         }
                     )
@@ -315,12 +315,22 @@ fun WaitingForFastbootView() {
 fun CommandSelectionView(
     isUnlock: Boolean,
     presetOptions: List<String>,
+    controllerError: String? = null,
     onProceed: (String) -> Unit,
     onCancel: () -> Unit
 ) {
     var selectedPresetIndex by remember { mutableIntStateOf(0) }
     var useCustomCommand by remember { mutableStateOf(false) }
     var customCommandText by remember { mutableStateOf("") }
+    val customValidation = remember(customCommandText) {
+        FastbootCommandPolicy.validateWizardCustomCommand(customCommandText)
+    }
+    val customErrorText = when {
+        useCustomCommand && customCommandText.isNotBlank() && customValidation is FastbootValidationResult.Blocked ->
+            customValidation.reason
+        useCustomCommand -> controllerError
+        else -> null
+    }
 
     val operationName = stringResource(
         if (isUnlock) R.string.wizard_op_unlock_short else R.string.wizard_op_lock_short
@@ -412,6 +422,8 @@ fun CommandSelectionView(
             label = { Text(stringResource(R.string.wizard_custom_command_label)) },
             placeholder = { Text(stringResource(R.string.wizard_custom_command_placeholder)) },
             prefix = { Text(stringResource(R.string.wizard_fastboot_prefix)) },
+            isError = customErrorText != null,
+            supportingText = customErrorText?.let { err -> { Text(err) } },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -432,7 +444,7 @@ fun CommandSelectionView(
         Button(
             onClick = {
                 val commandToSend = if (useCustomCommand) {
-                    customCommandText.trim()
+                    (customValidation as? FastbootValidationResult.Allowed)?.normalizedCommand.orEmpty()
                 } else {
                     presetOptions[selectedPresetIndex]
                 }
@@ -440,7 +452,7 @@ fun CommandSelectionView(
                     onProceed(commandToSend)
                 }
             },
-            enabled = !useCustomCommand || customCommandText.trim().isNotEmpty(),
+            enabled = !useCustomCommand || customValidation is FastbootValidationResult.Allowed,
             modifier = Modifier.weight(1f)
         ) {
             Text(stringResource(R.string.action_next))

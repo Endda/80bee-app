@@ -17,14 +17,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
+import com.eightbee.app.FlashPhase
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
+import com.eightbee.app.features.MagiskPatcherController
 import com.eightbee.app.ui.theme.ActionBlue
 import com.eightbee.app.ui.theme.SuccessGreen
 
 @Composable
-internal fun StepFastbootFlash(viewModel: MainViewModel, state: PixelMagiskPatcherState) {
+internal fun StepFastbootFlash(controller: MagiskPatcherController, state: PixelMagiskPatcherState) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -80,16 +81,27 @@ internal fun StepFastbootFlash(viewModel: MainViewModel, state: PixelMagiskPatch
                     fontWeight = FontWeight.Bold
                 )
 
+                val flashPhase = state.flashPhase
+                val step1Active = flashPhase == FlashPhase.AwaitingHandshake && !state.isFastbootConnected
+                val step1Completed = flashPhase != FlashPhase.AwaitingHandshake || state.isFastbootConnected
+                val step2Active = flashPhase == FlashPhase.RebootSent && !state.isFastbootConnected
+                val step2Completed = state.isFastbootConnected || flashPhase == FlashPhase.Succeeded
+                val step3Active = state.isFastbootConnected ||
+                    flashPhase == FlashPhase.Flashing ||
+                    flashPhase == FlashPhase.Succeeded ||
+                    flashPhase is FlashPhase.Failed
+                val step3Completed = flashPhase == FlashPhase.Succeeded
+
                 WorkflowItem(
                     stepNumber = 1,
                     title = stringResource(R.string.patcher_wf_step1_title),
                     description = stringResource(R.string.patcher_wf_step1_desc),
-                    active = state.flashStep == 1,
-                    completed = state.flashStep > 1
+                    active = step1Active,
+                    completed = step1Completed
                 ) {
                     Button(
-                        onClick = { viewModel.rebootMagiskToBootloader() },
-                        enabled = state.flashStep == 1
+                        onClick = { controller.rebootToBootloader() },
+                        enabled = step1Active
                     ) {
                         Text(stringResource(R.string.patcher_wf_step1_button))
                     }
@@ -99,8 +111,8 @@ internal fun StepFastbootFlash(viewModel: MainViewModel, state: PixelMagiskPatch
                     stepNumber = 2,
                     title = stringResource(R.string.patcher_wf_step2_title),
                     description = stringResource(R.string.patcher_wf_step2_desc),
-                    active = state.flashStep == 2,
-                    completed = state.flashStep > 2 || state.isFastbootConnected
+                    active = step2Active,
+                    completed = step2Completed
                 ) {
                     Text(
                         text = stringResource(
@@ -116,14 +128,14 @@ internal fun StepFastbootFlash(viewModel: MainViewModel, state: PixelMagiskPatch
                     stepNumber = 3,
                     title = stringResource(R.string.patcher_wf_step3_title),
                     description = stringResource(R.string.patcher_wf_step3_desc),
-                    active = state.flashStep == 3 || state.isFastbootConnected,
-                    completed = state.flashComplete
+                    active = step3Active,
+                    completed = step3Completed
                 ) {
                     Button(
-                        onClick = { viewModel.flashMagiskPatchedImage() },
+                        onClick = { controller.flashPatchedImage() },
                         enabled = state.isFastbootConnected &&
-                            !state.flashComplete &&
-                            state.fastbootStatus != "STATUS: FLASHING_PARTITION",
+                            flashPhase != FlashPhase.Succeeded &&
+                            flashPhase != FlashPhase.Flashing,
                         colors = ButtonDefaults.buttonColors(containerColor = ActionBlue)
                     ) {
                         Icon(Icons.Filled.Star, contentDescription = null, tint = Color.White)
@@ -134,23 +146,30 @@ internal fun StepFastbootFlash(viewModel: MainViewModel, state: PixelMagiskPatch
             }
         }
 
-        if (state.fastbootStatus.isNotEmpty()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = stringResource(R.string.patcher_fastboot_status_format, state.fastbootStatus),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    if (state.patchLogs.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        TerminalLogView(logs = state.patchLogs, modifier = Modifier.height(100.dp))
-                    }
+        val fastbootStatusLabel = when (val phase = state.flashPhase) {
+            FlashPhase.AwaitingHandshake -> "Awaiting Fastboot Handshake"
+            FlashPhase.RebootSent -> "STATUS: REBOOT_SENT"
+            FlashPhase.FastbootReady -> "STATUS: FASTBOOT_CONNECTED"
+            FlashPhase.Flashing -> "STATUS: FLASHING_PARTITION"
+            FlashPhase.Succeeded -> "STATUS: FLASH_SUCCESS"
+            is FlashPhase.Failed -> "STATUS: FLASH_FAILED (${phase.message})"
+        }
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = stringResource(R.string.patcher_fastboot_status_format, fastbootStatusLabel),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                if (state.patchLogs.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TerminalLogView(logs = state.patchLogs, modifier = Modifier.height(100.dp))
                 }
             }
         }

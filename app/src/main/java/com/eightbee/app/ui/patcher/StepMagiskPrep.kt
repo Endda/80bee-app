@@ -20,18 +20,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
+import com.eightbee.app.MagiskExtractPhase
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
+import com.eightbee.app.features.MagiskPatcherController
 
 @Composable
-internal fun StepMagiskPrep(viewModel: MainViewModel, state: PixelMagiskPatcherState) {
+internal fun StepMagiskPrep(controller: MagiskPatcherController, state: PixelMagiskPatcherState) {
     val uriHandler = LocalUriHandler.current
 
     val apkFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { viewModel.handleMagiskApkSelected(it) }
+        uri?.let { controller.handleMagiskApkSelected(it) }
     }
 
     Column(
@@ -102,7 +103,19 @@ internal fun StepMagiskPrep(viewModel: MainViewModel, state: PixelMagiskPatcherS
             }
         }
 
-        if (state.appStatus != "STATUS: IDLE") {
+        val extractPhase = state.magiskExtractPhase
+        if (extractPhase !is MagiskExtractPhase.Idle) {
+            val extractProgress = when (extractPhase) {
+                is MagiskExtractPhase.InProgress -> extractPhase.progress
+                MagiskExtractPhase.Ready -> 1f
+                else -> 0f
+            }
+            val extractLabel = when (extractPhase) {
+                is MagiskExtractPhase.InProgress -> "STATUS: DECOMPRESSING"
+                MagiskExtractPhase.Ready -> "STATUS: DECOMPRESS_SUCCESS"
+                is MagiskExtractPhase.Failed -> "STATUS: EXTRACTION_FAILED (${extractPhase.message})"
+                MagiskExtractPhase.Idle -> ""
+            }
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -121,7 +134,7 @@ internal fun StepMagiskPrep(viewModel: MainViewModel, state: PixelMagiskPatcherS
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = stringResource(R.string.patcher_percent_format, (state.extractProgress * 100).toInt()),
+                            text = stringResource(R.string.patcher_percent_format, (extractProgress * 100).toInt()),
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -130,12 +143,12 @@ internal fun StepMagiskPrep(viewModel: MainViewModel, state: PixelMagiskPatcherS
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(
-                        progress = { state.extractProgress },
+                        progress = { extractProgress },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = state.appStatus,
+                        text = extractLabel,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.secondary

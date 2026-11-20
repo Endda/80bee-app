@@ -24,28 +24,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.InstallStep
-import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
 import com.eightbee.app.SideloadState
-import com.eightbee.app.connection.ConnectionManager
+import com.eightbee.app.features.SideloadController
 import com.eightbee.app.ui.theme.SuccessGreen
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SideloadBottomSheet(
-    viewModel: MainViewModel,
-    connectionManager: ConnectionManager,
+    controller: SideloadController,
     onDismiss: () -> Unit
 ) {
-    val sideloadState by viewModel.sideloadState.collectAsState()
+    val sideloadState by controller.state.collectAsState()
 
     ModalBottomSheet(
         onDismissRequest = {
             if (sideloadState !is SideloadState.Installing &&
                 sideloadState !is SideloadState.CopyingAndParsing
             ) {
-                viewModel.clearSideloadState()
+                controller.clear()
                 onDismiss()
             }
         },
@@ -69,9 +67,8 @@ fun SideloadBottomSheet(
                 is SideloadState.ConfigReady -> {
                     ConfigView(
                         config = state,
-                        connectionManager = connectionManager,
                         onInstall = { bypassLowSdk, grantPerms, allowDowngrade, testOnly, sdCard ->
-                            viewModel.executeSideloadInstall(
+                            controller.executeInstall(
                                 config = state,
                                 bypassLowTargetSdk = bypassLowSdk,
                                 grantAllPermissions = grantPerms,
@@ -81,7 +78,7 @@ fun SideloadBottomSheet(
                             )
                         },
                         onCancel = {
-                            viewModel.clearSideloadState()
+                            controller.clear()
                             onDismiss()
                         }
                     )
@@ -93,7 +90,7 @@ fun SideloadBottomSheet(
                     SuccessView(
                         appLabel = state.appLabel,
                         onDismiss = {
-                            viewModel.clearSideloadState()
+                            controller.clear()
                             onDismiss()
                         }
                     )
@@ -103,7 +100,7 @@ fun SideloadBottomSheet(
                         message = state.message,
                         step = state.step,
                         onDismiss = {
-                            viewModel.clearSideloadState()
+                            controller.clear()
                             onDismiss()
                         }
                     )
@@ -136,25 +133,13 @@ fun ParsingView() {
 @Composable
 fun ConfigView(
     config: SideloadState.ConfigReady,
-    connectionManager: ConnectionManager,
     onInstall: (Boolean, Boolean, Boolean, Boolean, Boolean) -> Unit,
     onCancel: () -> Unit
 ) {
-    var targetSdk by remember(connectionManager) { mutableStateOf<Int?>(null) }
-    var bypassLowTargetSdk by remember(connectionManager) { mutableStateOf(false) }
-    LaunchedEffect(connectionManager) {
-        try {
-            val sdkStr = connectionManager.runShellCommand("getprop ro.build.version.sdk").trim()
-            val parsedSdk = sdkStr.toIntOrNull()
-            targetSdk = parsedSdk ?: 0
-            bypassLowTargetSdk = (parsedSdk ?: 0) >= 34
-        } catch (_: Exception) {
-            targetSdk = 0
-            bypassLowTargetSdk = false
-        }
+    val isTargetAndroid14OrHigher = config.targetDeviceSdk >= 34
+    var bypassLowTargetSdk by remember(config.targetDeviceSdk) {
+        mutableStateOf(isTargetAndroid14OrHigher)
     }
-
-    val isTargetAndroid14OrHigher = (targetSdk ?: 0) >= 34
 
     var grantAllPermissions by remember { mutableStateOf(false) }
     var allowDowngrade by remember { mutableStateOf(false) }
@@ -289,11 +274,8 @@ fun ConfigView(
             Text(stringResource(R.string.sideload_opt_bypass_sdk_title), style = MaterialTheme.typography.bodyLarge)
             Text(
                 text = stringResource(
-                    when {
-                        targetSdk == null -> R.string.sideload_opt_bypass_sdk_detecting
-                        isTargetAndroid14OrHigher -> R.string.sideload_opt_bypass_sdk_supported
-                        else -> R.string.sideload_opt_bypass_sdk_unsupported
-                    }
+                    if (isTargetAndroid14OrHigher) R.string.sideload_opt_bypass_sdk_supported
+                    else R.string.sideload_opt_bypass_sdk_unsupported
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

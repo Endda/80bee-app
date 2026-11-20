@@ -1,16 +1,19 @@
 package com.eightbee.app.connection
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
+import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.lang.reflect.Method
@@ -19,6 +22,12 @@ class ShizukuConnectionManager : ConnectionManager {
 
     private val _isAvailableFlow = MutableStateFlow(isAvailable())
     override val isAvailableFlow: StateFlow<Boolean> = _isAvailableFlow.asStateFlow()
+
+    private val _connectionState = MutableStateFlow(currentConnectionState())
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    override val isLocal: Boolean = true
+    override val supportsFastboot: Boolean = false
 
     @Volatile
     private var listenersRegistered = false
@@ -49,9 +58,36 @@ class ShizukuConnectionManager : ConnectionManager {
     override suspend fun runShellCommandWithInput(command: String, input: InputStream): String =
         executeProcess(command, input = input)
 
+    override suspend fun runShellCommandLive(command: String, onLineRead: (String) -> Unit) {
+        val output = executeProcess(command, input = null)
+        if (output.isNotEmpty()) {
+            output.lineSequence().forEach(onLineRead)
+        }
+    }
+
+    override suspend fun pushFile(
+        input: InputStream,
+        size: Long,
+        remotePath: String,
+        onProgress: ((Long, Long) -> Unit)?
+    ) {
+        val quoted = quoteRemoteShellPath(remotePath)
+        runShellCommandWithInput("cat > $quoted", input)
+        onProgress?.invoke(size, size)
+    }
+
+    override suspend fun pullFile(
+        remotePath: String,
+        destination: File,
+        maxBytes: Long,
+        onProgress: ((Long) -> Unit)?
+    ) {
+        throw UnsupportedOperationException("pullFile is only supported over USB OTG.")
+    }
+
     private suspend fun executeProcess(command: String, input: InputStream?): String = withContext(Dispatchers.IO) {
         if (!isAvailable()) {
-            return@withContext "Error: Shizuku is not running or permission not granted."
+            throw IOException("Shizuku is not running or permission not granted.")
         }
 
         try {
@@ -63,6 +99,8 @@ class ShizukuConnectionManager : ConnectionManager {
                             process.outputStream.use { out ->
                                 stream.copyTo(out)
                             }
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (_: Exception) {
                         }
                     }
@@ -89,17 +127,21 @@ class ShizukuConnectionManager : ConnectionManager {
                     }
                 }.trim()
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            throw e
         } catch (e: Exception) {
-            "Error executing via Shizuku: ${e.message}"
+            throw IOException("Error executing via Shizuku: ${e.message}", e)
         }
     }
 
-    override suspend fun sendFastbootCommand(command: String): String {
-        return "Error: Fastboot commands cannot be executed locally via Shizuku."
+    override suspend fun sendFastbootCommand(command: String): FastbootReply {
+        throw UnsupportedOperationException("Fastboot commands cannot be executed locally via Shizuku.")
     }
 
     override suspend fun flashFastbootImage(partition: String, stream: InputStream, size: Long): String {
-        return "Error: Fastboot commands cannot be executed locally via Shizuku."
+        throw UnsupportedOperationException("Fastboot commands cannot be executed locally via Shizuku.")
     }
 
     override fun isAvailable(): Boolean {
@@ -109,6 +151,9 @@ class ShizukuConnectionManager : ConnectionManager {
             false
         }
     }
+
+    private fun currentConnectionState(): ConnectionState =
+        if (isAvailable()) ConnectionState.LocalConnected else ConnectionState.Disconnected
     
     fun requestPermission(requestCode: Int) {
         try {
@@ -152,6 +197,8 @@ class ShizukuConnectionManager : ConnectionManager {
     }
 
     fun refresh() {
-        _isAvailableFlow.value = isAvailable()
+        val available = isAvailable()
+        _isAvailableFlow.value = available
+        _connectionState.value = if (available) ConnectionState.LocalConnected else ConnectionState.Disconnected
     }
 }

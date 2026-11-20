@@ -1,5 +1,6 @@
 package com.eightbee.app
 
+import com.eightbee.app.connection.FastbootReply
 import com.eightbee.app.connection.FastbootTransport
 import com.eightbee.app.connection.FastbootUsbClient
 import com.eightbee.app.ui.parseBatteryDumpsys
@@ -164,5 +165,22 @@ class BatteryAndFastbootTest {
         assertThrows(IOException::class.java) {
             client.sendCommand("getvar:product")
         }
+    }
+
+    @Test
+    fun fastbootReply_formatDisplayFormatsInfoOkayAndFailConsistently() {
+        val infoOkay = FastbootReply(
+            status = "OKAY",
+            message = "unlocked: yes",
+            info = listOf("product: raven")
+        )
+        assertEquals("INFO: product: raven\nOKAY: unlocked: yes", infoOkay.formatDisplay())
+
+        val bareOkay = FastbootReply(status = "OKAY", message = "")
+        assertEquals("OKAY", bareOkay.formatDisplay())
+
+        val fail = FastbootReply(status = "FAIL", message = "command not allowed")
+        assertEquals("FAIL: command not allowed", fail.formatDisplay())
+        assertFalse(fail.isOkay)
     }
 }

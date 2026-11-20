@@ -16,7 +16,8 @@ sealed class SideloadState {
         val totalSize: Long,
         val apkFiles: List<File>,
         val isArchive: Boolean,
-        val archiveName: String
+        val archiveName: String,
+        val targetDeviceSdk: Int = 0
     ) : SideloadState()
 
     data class Installing(

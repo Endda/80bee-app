@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
 import com.eightbee.app.Screen
-import com.eightbee.app.connection.OtgConnectionManager
 
 sealed class NavItem(@param:StringRes val titleRes: Int, val icon: ImageVector) {
     object Home : NavItem(R.string.nav_home, Icons.Filled.Home)
@@ -88,16 +87,50 @@ fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
                 }
             } else {
                 when (currentScreen) {
-                    Screen.Debloater -> DebloaterScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.BatteryDiagnostic -> BatteryDiagnosticScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.BatteryOptimizer -> BatteryOptimizerScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.AudioMods -> AudioModsScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.BluetoothRepair -> BluetoothRepairScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.HaInstaller -> HaInstallerScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.BootManager -> BootManagerScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.UiAdjustments -> UiAdjustmentsScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.DnsToggle -> DnsToggleScreen(viewModel) { viewModel.navigateBack() }
-                    Screen.BootloaderUtilities -> BootloaderUtilitiesScreen(viewModel) { viewModel.navigateBack() }
+                    Screen.Debloater -> DebloaterScreen(
+                        controller = viewModel.debloaterController,
+                        activeConnection = viewModel.activeConnection.collectAsState().value,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.BatteryDiagnostic -> BatteryDiagnosticScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.BatteryOptimizer -> BatteryOptimizerScreen(
+                        tweaksController = viewModel.deviceTweaksController,
+                        optimizerController = viewModel.batteryOptimizerController,
+                        activeConnection = viewModel.activeConnection.collectAsState().value,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.AudioMods -> AudioModsScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.BluetoothRepair -> BluetoothRepairScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.HaInstaller -> HaInstallerScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.BootManager -> BootManagerScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.UiAdjustments -> UiAdjustmentsScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.DnsToggle -> DnsToggleScreen(
+                        controller = viewModel.deviceTweaksController,
+                        onBack = { viewModel.navigateBack() }
+                    )
+                    Screen.BootloaderUtilities -> BootloaderUtilitiesScreen(
+                        wizardController = viewModel.bootloaderWizardController,
+                        activeConnection = viewModel.activeConnection.collectAsState().value,
+                        onBack = { viewModel.navigateBack() }
+                    )
                     else -> {}
                 }
             }
@@ -129,7 +162,7 @@ fun AdvancedTab(viewModel: MainViewModel) {
             description = stringResource(R.string.card_app_management_desc),
             onOpenDebloater = { viewModel.navigateTo(Screen.Debloater) },
             onApkPicked = { uri ->
-                viewModel.startSideload(uri)
+                viewModel.sideloadController.startSideload(uri)
                 showSideloadSheet = true
             }
         )
@@ -158,7 +191,7 @@ fun AdvancedTab(viewModel: MainViewModel) {
             onClick = { viewModel.navigateTo(Screen.HaInstaller) }
         )
 
-        if (connectionManager is OtgConnectionManager) {
+        if (connectionManager.supportsFastboot) {
             Spacer(modifier = Modifier.height(16.dp))
             AdvancedLauncherCard(
                 title = stringResource(R.string.card_bootloader_utilities_title),
@@ -170,8 +203,7 @@ fun AdvancedTab(viewModel: MainViewModel) {
 
     if (showSideloadSheet) {
         SideloadBottomSheet(
-            viewModel = viewModel,
-            connectionManager = connectionManager,
+            controller = viewModel.sideloadController,
             onDismiss = { showSideloadSheet = false }
         )
     }

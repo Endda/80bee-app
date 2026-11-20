@@ -10,15 +10,33 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.io.OutputStream
 
 /** Handles bloatware scanning, package disable/uninstall/restore, and snapshot export/import. */
-class DebloaterController(
-    private val application: Application,
+class DebloaterController internal constructor(
+    private val loadUltimateDb: () -> Map<String, BloatInfo>,
+    private val loadDegoogleDb: () -> List<PresetPkg>,
+    private val loadSamsungDb: () -> List<PresetPkg>,
+    private val openOutputStream: (Uri) -> OutputStream?,
+    private val readUriText: (Uri) -> String,
     private val runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit
 ) {
+    constructor(
+        application: Application,
+        runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit
+    ) : this(
+        loadUltimateDb = { PackageDatabase.loadUltimateDb(application) },
+        loadDegoogleDb = { PackageDatabase.loadDegoogleDb(application) },
+        loadSamsungDb = { PackageDatabase.loadSamsungDb(application) },
+        openOutputStream = { uri -> application.contentResolver.openOutputStream(uri) },
+        readUriText = { uri -> readUriTextBounded(application, uri) },
+        runExclusive = runExclusive
+    )
+
     private val _debloatList = MutableStateFlow<List<BloatInfo>>(emptyList())
     val debloatList: StateFlow<List<BloatInfo>> = _debloatList.asStateFlow()
 
@@ -31,6 +49,9 @@ class DebloaterController(
     private val _restoreList = MutableStateFlow<List<PresetPkg>>(emptyList())
     val restoreList: StateFlow<List<PresetPkg>> = _restoreList.asStateFlow()
 
+    private val _disabledPackages = MutableStateFlow<Set<String>>(emptySet())
+    val disabledPackages: StateFlow<Set<String>> = _disabledPackages.asStateFlow()
+
     private val _snapshotFeedback = MutableStateFlow<String?>(null)
     val snapshotFeedback: StateFlow<String?> = _snapshotFeedback.asStateFlow()
 
@@ -42,13 +63,20 @@ class DebloaterController(
         return parsePmListPackages(raw)
     }
 
+    private suspend fun queryInstalledAndDisabled(conn: ConnectionManager): Set<String> {
+        val installed = runPmListPackages(conn, "pm list packages").toSet()
+        val disabled = runPmListPackages(conn, "pm list packages -d").toSet()
+        _disabledPackages.value = disabled
+        return installed
+    }
+
     fun scanBloatware(safetyLevel: String) {
         runExclusive("Scanning for bloatware...", true) { conn ->
             val manufacturer = conn.runShellCommand("getprop ro.product.manufacturer").trim()
             val brand = conn.runShellCommand("getprop ro.product.brand").trim()
-            val installed = runPmListPackages(conn, "pm list packages").toSet()
+            val installed = queryInstalledAndDisabled(conn)
 
-            val db = PackageDatabase.loadUltimateDb(application)
+            val db = loadUltimateDb()
             val allowedLevels = PackageDatabase.allowedSafetyLevels(safetyLevel)
 
             val filtered = db.values.filter { bloat ->
@@ -64,8 +92,8 @@ class DebloaterController(
 
     fun scanDegoogle(maxTier: Int) {
         runExclusive("Scanning for Google packages...", true) { conn ->
-            val installed = runPmListPackages(conn, "pm list packages").toSet()
-            val filtered = PackageDatabase.loadDegoogleDb(application).filter { preset ->
+            val installed = queryInstalledAndDisabled(conn)
+            val filtered = loadDegoogleDb().filter { preset ->
                 installed.contains(preset.id) && preset.tier <= maxTier
             }
             _degoogleList.value = filtered
@@ -75,8 +103,8 @@ class DebloaterController(
 
     fun scanDesamsung(maxTier: Int) {
         runExclusive("Scanning for Samsung packages...", true) { conn ->
-            val installed = runPmListPackages(conn, "pm list packages").toSet()
-            val filtered = PackageDatabase.loadSamsungDb(application).filter { preset ->
+            val installed = queryInstalledAndDisabled(conn)
+            val filtered = loadSamsungDb().filter { preset ->
                 installed.contains(preset.id) && preset.tier <= maxTier
             }
             _desamsungList.value = filtered
@@ -89,6 +117,7 @@ class DebloaterController(
             var success = 0
             var fail = 0
             var lastFailure: String? = null
+            val succeededPackages = mutableSetOf<String>()
             for (pkg in packages) {
                 if (!PackageDatabase.isValidPackageName(pkg)) {
                     fail++
@@ -103,9 +132,21 @@ class DebloaterController(
                 val out = conn.runShellCommand(cmd)
                 if (out.lowercase().contains("success") || out.lowercase().contains("new state: disabled-user")) {
                     success++
+                    succeededPackages.add(pkg)
                 } else {
                     fail++
                     lastFailure = "Failed on $pkg: $out"
+                }
+            }
+            if (succeededPackages.isNotEmpty()) {
+                if (isUninstall) {
+                    _disabledPackages.update { it - succeededPackages }
+                    _debloatList.update { list -> list.filterNot { it.packageName in succeededPackages } }
+                    _degoogleList.update { list -> list.filterNot { it.id in succeededPackages } }
+                    _desamsungList.update { list -> list.filterNot { it.id in succeededPackages } }
+                    _restoreList.update { list -> list.filterNot { it.id in succeededPackages } }
+                } else {
+                    _disabledPackages.update { it + succeededPackages }
                 }
             }
             if (lastFailure != null && success == 0) {
@@ -120,6 +161,7 @@ class DebloaterController(
         runExclusive("Restoring packages...", true) { conn ->
             var success = 0
             var fail = 0
+            val restoredPackages = mutableSetOf<String>()
             for (pkg in packages) {
                 if (!PackageDatabase.isValidPackageName(pkg)) {
                     fail++
@@ -128,14 +170,20 @@ class DebloaterController(
                 var out = conn.runShellCommand("pm enable $pkg")
                 if (out.lowercase().contains("new state: enabled") || out.lowercase().contains("success")) {
                     success++
+                    restoredPackages.add(pkg)
                 } else {
                     out = conn.runShellCommand("cmd package install-existing --user 0 $pkg")
                     if (out.lowercase().contains("installed") || out.lowercase().contains("success")) {
                         success++
+                        restoredPackages.add(pkg)
                     } else {
                         fail++
                     }
                 }
+            }
+            if (restoredPackages.isNotEmpty()) {
+                _disabledPackages.update { it - restoredPackages }
+                _restoreList.update { list -> list.filterNot { it.id in restoredPackages } }
             }
             "Restore complete. Success: $success, Failed: $fail"
         }
@@ -144,6 +192,7 @@ class DebloaterController(
     fun scanDisabledPackages() {
         runExclusive("Scanning disabled packages...", true) { conn ->
             val disabled = runPmListPackages(conn, "pm list packages -d")
+            _disabledPackages.value = disabled.toSet()
             _restoreList.value = disabled.map { PresetPkg(it, it, 1, "Currently disabled package.", "") }
             _snapshotFeedback.value = null
             "Found ${disabled.size} disabled package(s)."
@@ -158,7 +207,7 @@ class DebloaterController(
                     put("timestamp", System.currentTimeMillis())
                     put("packages", JSONArray().apply { packages.forEach { put(it) } })
                 }
-                val outputStream = application.contentResolver.openOutputStream(uri)
+                val outputStream = openOutputStream(uri)
                     ?: throw IOException("Unable to open destination file.")
                 outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
                     writer.write(obj.toString(2))
@@ -179,9 +228,9 @@ class DebloaterController(
     fun importSnapshotFromUri(uri: Uri) {
         runExclusive("Comparing snapshot against device...", true) { conn ->
             try {
-                val content = readUriTextBounded(application, uri)
+                val content = readUriText(uri)
                 val parsed = PackageDatabase.parseSnapshotPackageNames(content)
-                val installed = runPmListPackages(conn, "pm list packages").toSet()
+                val installed = queryInstalledAndDisabled(conn)
 
                 val missing = parsed.validPackages.filter { !installed.contains(it) }
                 _restoreList.value = missing.map {

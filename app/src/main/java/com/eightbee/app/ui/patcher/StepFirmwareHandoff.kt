@@ -29,12 +29,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
+import com.eightbee.app.FirmwarePhase
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
+import com.eightbee.app.features.MagiskPatcherController
 
 @Composable
-internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPatcherState) {
+internal fun StepFirmwareHandoff(controller: MagiskPatcherController, state: PixelMagiskPatcherState) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val uriHandler = LocalUriHandler.current
@@ -42,7 +43,7 @@ internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPat
     val bootFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { viewModel.handleMagiskBootFileSelected(it) }
+        uri?.let { controller.handleBootFileSelected(it) }
     }
 
     Column(
@@ -138,6 +139,19 @@ internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPat
             }
         }
 
+        val firmwarePhase = state.firmwarePhase
+        val statusLabel = when (firmwarePhase) {
+            FirmwarePhase.Idle -> "READY_FOR_IMAGE"
+            is FirmwarePhase.InProgress -> firmwarePhase.label
+            FirmwarePhase.Loaded -> "IMAGE_LOADED"
+            is FirmwarePhase.Failed -> "LOAD_FAILED"
+        }
+        val firmwareProgress = when (firmwarePhase) {
+            is FirmwarePhase.InProgress -> firmwarePhase.progress
+            FirmwarePhase.Loaded -> 1f
+            else -> 0f
+        }
+
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
@@ -156,7 +170,7 @@ internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPat
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = state.integrityStatus,
+                        text = statusLabel,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -164,10 +178,10 @@ internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPat
                     )
                 }
 
-                if (state.integrityProgress > 0f) {
+                if (firmwareProgress > 0f) {
                     Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(
-                        progress = { state.integrityProgress },
+                        progress = { firmwareProgress },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -182,7 +196,7 @@ internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPat
             }
         }
 
-        state.imageError?.let { errorMsg ->
+        if (firmwarePhase is FirmwarePhase.Failed) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                 modifier = Modifier.fillMaxWidth()
@@ -198,7 +212,7 @@ internal fun StepFirmwareHandoff(viewModel: MainViewModel, state: PixelMagiskPat
                         tint = MaterialTheme.colorScheme.error
                     )
                     Text(
-                        text = errorMsg,
+                        text = firmwarePhase.message,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )

@@ -3,6 +3,7 @@ package com.eightbee.app.features
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.eightbee.app.connection.ConnectionManager
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -100,4 +101,41 @@ internal fun parsePmListPackages(output: String): List<String> {
         .map { it.substringAfter("package:") }
         .filter { it.isNotEmpty() }
         .toList()
+}
+
+private const val KV_MARKER_PREFIX = "__K_"
+private const val KV_MARKER_SEP = "__="
+internal const val BATCH_FAILURE_MARKER = "__80BEE_BATCH_FAILED__"
+
+internal suspend fun ConnectionManager.queryKeyValues(queries: Map<String, String>): Map<String, String> {
+    if (queries.isEmpty()) return emptyMap()
+    val script = queries.entries.joinToString("; ") { (key, cmd) ->
+        "echo \"$KV_MARKER_PREFIX${key}$KV_MARKER_SEP$($cmd 2>/dev/null)\""
+    }
+    return parseKeyValueOutput(runShellCommand(script))
+}
+
+internal fun parseKeyValueOutput(raw: String): Map<String, String> {
+    val result = LinkedHashMap<String, String>()
+    for (line in raw.lineSequence()) {
+        val trimmed = line.trim()
+        if (!trimmed.startsWith(KV_MARKER_PREFIX)) continue
+        val sepIdx = trimmed.indexOf(KV_MARKER_SEP, startIndex = KV_MARKER_PREFIX.length)
+        if (sepIdx == -1) continue
+        val key = trimmed.substring(KV_MARKER_PREFIX.length, sepIdx)
+        val value = trimmed.substring(sepIdx + KV_MARKER_SEP.length).trim()
+        result[key] = value
+    }
+    return result
+}
+
+internal suspend fun ConnectionManager.runShellBatch(commands: List<String>): String {
+    if (commands.isEmpty()) return ""
+    val joined = commands.joinToString(" && ")
+    val output = runShellCommand("($joined) || echo '$BATCH_FAILURE_MARKER'").trim()
+    if (output.contains(BATCH_FAILURE_MARKER)) {
+        val detail = output.replace(BATCH_FAILURE_MARKER, "").trim()
+        throw IOException(detail.ifEmpty { "Shell command batch failed." })
+    }
+    return output
 }

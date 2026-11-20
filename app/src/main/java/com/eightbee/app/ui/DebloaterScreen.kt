@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,33 +21,37 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
-import com.eightbee.app.connection.ShizukuConnectionManager
+import com.eightbee.app.connection.ConnectionManager
+import com.eightbee.app.features.DebloaterController
 
-private data class PackageListUiData(
-    val packages: List<String>,
-    val labels: Map<String, String>,
-    val descriptions: Map<String, String>,
-    val riskFactors: Map<String, String>
+private data class PackageDisplayItem(
+    val pkg: String,
+    val label: String,
+    val description: String?,
+    val risk: String?
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
+fun DebloaterScreen(
+    controller: DebloaterController,
+    activeConnection: ConnectionManager?,
+    onBack: () -> Unit
+) {
     val resources = LocalResources.current
-    val debloatList by viewModel.debloatList.collectAsState()
-    val degoogleList by viewModel.degoogleList.collectAsState()
-    val desamsungList by viewModel.desamsungList.collectAsState()
-    val restoreList by viewModel.restoreList.collectAsState()
-    val snapshotFeedback by viewModel.snapshotFeedback.collectAsState()
-    val activeConnection by viewModel.activeConnection.collectAsState()
-    val isLocalConnection = activeConnection is ShizukuConnectionManager
+    val debloatList by controller.debloatList.collectAsState()
+    val degoogleList by controller.degoogleList.collectAsState()
+    val desamsungList by controller.desamsungList.collectAsState()
+    val restoreList by controller.restoreList.collectAsState()
+    val disabledPackages by controller.disabledPackages.collectAsState()
+    val snapshotFeedback by controller.snapshotFeedback.collectAsState()
+    val isLocalConnection = activeConnection?.isLocal == true
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: General, 1: De-Google, 2: De-Samsung, 3: Restore
     var safetyLevel by remember { mutableStateOf("recommended") }
     var degoogleTier by remember { mutableIntStateOf(1) }
     var desamsungTier by remember { mutableIntStateOf(1) }
+    var hideDisabled by remember { mutableStateOf(false) }
 
     val checkedPackages = remember { mutableStateMapOf<String, Boolean>() }
     var pendingConfirmUninstall by remember { mutableStateOf<Boolean?>(null) }
@@ -55,7 +59,7 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     val exportSnapshotLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri: Uri? ->
-        uri?.let { viewModel.exportPackageSnapshot(it) }
+        uri?.let { controller.exportSnapshotToUri(it) }
     }
 
     val importSnapshotLauncher = rememberLauncherForActivityResult(
@@ -63,462 +67,296 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
     ) { uri: Uri? ->
         uri?.let {
             checkedPackages.clear()
-            viewModel.importPackageSnapshot(it)
+            controller.importSnapshotFromUri(it)
             selectedTab = 3
         }
     }
 
-    val bloatUiData = remember(debloatList, resources) {
-        PackageListUiData(
-            packages = debloatList.map { it.packageName },
-            labels = debloatList.associate { it.packageName to it.label },
-            descriptions = debloatList.associate { it.packageName to it.description },
-            riskFactors = debloatList.associate {
-                it.packageName to if (it.safety.equals("recommended", ignoreCase = true) || it.safety.isBlank()) {
-                    ""
-                } else {
-                    resources.getString(R.string.debloater_safety_warning_format, it.safety)
-                }
+    val bloatItems = remember(debloatList, resources) {
+        debloatList.map { item ->
+            val riskText = if (item.safety.equals("recommended", ignoreCase = true) || item.safety.isBlank()) {
+                null
+            } else {
+                resources.getString(R.string.debloater_safety_warning_format, item.safety)
             }
-        )
-    }
-
-    val degoogleUiData = remember(degoogleList) {
-        PackageListUiData(
-            packages = degoogleList.map { it.id },
-            labels = degoogleList.associate { it.id to it.name },
-            descriptions = degoogleList.associate { it.id to it.description },
-            riskFactors = degoogleList.associate { it.id to it.riskFactor }
-        )
-    }
-
-    val desamsungUiData = remember(desamsungList) {
-        PackageListUiData(
-            packages = desamsungList.map { it.id },
-            labels = desamsungList.associate { it.id to it.name },
-            descriptions = desamsungList.associate { it.id to it.description },
-            riskFactors = desamsungList.associate { it.id to it.riskFactor }
-        )
-    }
-
-    val restoreUiData = remember(restoreList) {
-        PackageListUiData(
-            packages = restoreList.map { it.id },
-            labels = restoreList.associate { it.id to it.name },
-            descriptions = restoreList.associate { it.id to it.description },
-            riskFactors = emptyMap()
-        )
-    }
-
-    val activeUiData = when (selectedTab) {
-        0 -> bloatUiData
-        1 -> degoogleUiData
-        2 -> desamsungUiData
-        else -> restoreUiData
-    }
-    val isRestoreTab = selectedTab == 3
-    var allChecked by remember(selectedTab, activeUiData.packages) { mutableStateOf(false) }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.debloater_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back)
-                        )
-                    }
-                }
+            PackageDisplayItem(
+                pkg = item.packageName,
+                label = item.label,
+                description = item.description.takeIf { it.isNotBlank() },
+                risk = riskText
             )
         }
-    ) { paddingValues ->
-        Column(
+    }
+
+    val degoogleItems = remember(degoogleList) {
+        degoogleList.map { preset ->
+            PackageDisplayItem(
+                pkg = preset.id,
+                label = preset.name,
+                description = preset.description.takeIf { it.isNotBlank() },
+                risk = preset.riskFactor.takeIf { it.isNotBlank() }
+            )
+        }
+    }
+
+    val desamsungItems = remember(desamsungList) {
+        desamsungList.map { preset ->
+            PackageDisplayItem(
+                pkg = preset.id,
+                label = preset.name,
+                description = preset.description.takeIf { it.isNotBlank() },
+                risk = preset.riskFactor.takeIf { it.isNotBlank() }
+            )
+        }
+    }
+
+    val restoreItems = remember(restoreList) {
+        restoreList.map { preset ->
+            PackageDisplayItem(
+                pkg = preset.id,
+                label = preset.name,
+                description = preset.description.takeIf { it.isNotBlank() },
+                risk = null
+            )
+        }
+    }
+
+    val activeItems = when (selectedTab) {
+        0 -> bloatItems
+        1 -> degoogleItems
+        2 -> desamsungItems
+        else -> restoreItems
+    }
+    val activeByPkg = remember(activeItems) { activeItems.associateBy { it.pkg } }
+    val isRestoreTab = selectedTab == 3
+    val visibleItems = remember(activeItems, disabledPackages, hideDisabled, isRestoreTab) {
+        if (!isRestoreTab && hideDisabled) {
+            activeItems.filterNot { it.pkg in disabledPackages }
+        } else {
+            activeItems
+        }
+    }
+    var allChecked by remember(selectedTab, visibleItems) { mutableStateOf(false) }
+
+    ToolScreenScaffold(
+        title = stringResource(R.string.debloater_title),
+        onBack = onBack,
+        scrollable = false
+    ) {
+        LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item(key = "header_card") {
-                    OutlinedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = stringResource(R.string.debloater_card_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(R.string.debloater_card_desc),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
+            item(key = "header_card") {
+                ToolIntroCard(
+                    title = stringResource(R.string.debloater_card_title),
+                    description = stringResource(R.string.debloater_card_desc)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
 
-                item(key = "tab_row") {
-                    PrimaryTabRow(selectedTabIndex = selectedTab) {
-                        Tab(
-                            selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
-                            text = { Text(stringResource(R.string.debloater_tab_bloat)) }
-                        )
-                        Tab(
-                            selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
-                            text = { Text(stringResource(R.string.debloater_tab_google)) }
-                        )
-                        Tab(
-                            selected = selectedTab == 2,
-                            onClick = { selectedTab = 2 },
-                            text = { Text(stringResource(R.string.debloater_tab_samsung)) }
-                        )
-                        Tab(
-                            selected = selectedTab == 3,
-                            onClick = { selectedTab = 3 },
-                            text = { Text(stringResource(R.string.debloater_tab_restore)) }
-                        )
-                    }
+            item(key = "tab_row") {
+                PrimaryTabRow(selectedTabIndex = selectedTab) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = { Text(stringResource(R.string.debloater_tab_bloat)) }
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = { Text(stringResource(R.string.debloater_tab_google)) }
+                    )
+                    Tab(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        text = { Text(stringResource(R.string.debloater_tab_samsung)) }
+                    )
+                    Tab(
+                        selected = selectedTab == 3,
+                        onClick = { selectedTab = 3 },
+                        text = { Text(stringResource(R.string.debloater_tab_restore)) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            item(key = "tab_controls_$selectedTab") {
+                when (selectedTab) {
+                    0 -> GeneralBloatScanTab(
+                        safetyLevel = safetyLevel,
+                        onSelectSafetyLevel = { safetyLevel = it },
+                        onScan = {
+                            checkedPackages.clear()
+                            controller.scanBloatware(safetyLevel)
+                        }
+                    )
+                    1 -> TierScanTab(
+                        title = stringResource(R.string.debloater_degoogle_title),
+                        description = stringResource(R.string.debloater_degoogle_desc),
+                        scanButtonText = stringResource(R.string.debloater_scan_google),
+                        selectedTier = degoogleTier,
+                        onSelectTier = { degoogleTier = it },
+                        onScan = {
+                            checkedPackages.clear()
+                            controller.scanDegoogle(degoogleTier)
+                        }
+                    )
+                    2 -> TierScanTab(
+                        title = stringResource(R.string.debloater_desamsung_title),
+                        description = stringResource(R.string.debloater_desamsung_desc),
+                        scanButtonText = stringResource(R.string.debloater_scan_samsung),
+                        selectedTier = desamsungTier,
+                        onSelectTier = { desamsungTier = it },
+                        onScan = {
+                            checkedPackages.clear()
+                            controller.scanDesamsung(desamsungTier)
+                        }
+                    )
+                    else -> RestoreControlsTab(
+                        snapshotFeedback = snapshotFeedback,
+                        onExportSnapshot = {
+                            exportSnapshotLauncher.launch("80bee_snapshot_${System.currentTimeMillis()}.json")
+                        },
+                        onImportSnapshot = {
+                            importSnapshotLauncher.launch("application/json")
+                        },
+                        onScanDisabled = {
+                            checkedPackages.clear()
+                            controller.scanDisabledPackages()
+                        }
+                    )
+                }
+            }
+
+            if (activeItems.isNotEmpty()) {
+                item(key = "list_header") {
                     Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                item(key = "tab_controls_$selectedTab") {
-                    when (selectedTab) {
-                        0 -> {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    stringResource(R.string.debloater_general_title),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    stringResource(R.string.debloater_general_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf("recommended", "advanced", "unsafe").forEach { level ->
-                                        FilterChip(
-                                            selected = safetyLevel == level,
-                                            onClick = { safetyLevel = level },
-                                            label = { Text(level.uppercase()) }
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = {
-                                        checkedPackages.clear()
-                                        viewModel.scanBloatware(safetyLevel)
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(stringResource(R.string.debloater_scan_bloat))
-                                }
-                            }
-                        }
-                        1 -> {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    stringResource(R.string.debloater_degoogle_title),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    stringResource(R.string.debloater_degoogle_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf(1, 2, 3).forEach { tier ->
-                                        FilterChip(
-                                            selected = degoogleTier == tier,
-                                            onClick = { degoogleTier = tier },
-                                            label = { Text(stringResource(R.string.debloater_tier_format, tier)) }
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = {
-                                        checkedPackages.clear()
-                                        viewModel.scanDegoogle(degoogleTier)
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(stringResource(R.string.debloater_scan_google))
-                                }
-                            }
-                        }
-                        2 -> {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    stringResource(R.string.debloater_desamsung_title),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    stringResource(R.string.debloater_desamsung_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf(1, 2, 3).forEach { tier ->
-                                        FilterChip(
-                                            selected = desamsungTier == tier,
-                                            onClick = { desamsungTier = tier },
-                                            label = { Text(stringResource(R.string.debloater_tier_format, tier)) }
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = {
-                                        checkedPackages.clear()
-                                        viewModel.scanDesamsung(desamsungTier)
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(stringResource(R.string.debloater_scan_samsung))
-                                }
-                            }
-                        }
-                        else -> {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.debloater_restore_title),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    stringResource(R.string.debloater_restore_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                OutlinedCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text(
-                                            stringResource(R.string.debloater_create_snapshot_title),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            stringResource(R.string.debloater_create_snapshot_desc),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Button(
-                                            onClick = {
-                                                exportSnapshotLauncher.launch("80bee_snapshot_${System.currentTimeMillis()}.json")
-                                            },
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.debloater_cd_create_snapshot))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(stringResource(R.string.debloater_save_snapshot))
-                                        }
-                                    }
-                                }
-
-                                OutlinedCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text(
-                                            stringResource(R.string.debloater_restore_snapshot_title),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            stringResource(R.string.debloater_restore_snapshot_desc),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        FilledTonalButton(
-                                            onClick = { importSnapshotLauncher.launch("application/json") },
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.debloater_cd_upload_snapshot))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(stringResource(R.string.debloater_upload_backup))
-                                        }
-                                        snapshotFeedback?.let { feedback ->
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            Text(
-                                                text = feedback,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (feedback.startsWith("Failed") || feedback.contains("Ignored")) {
-                                                    MaterialTheme.colorScheme.error
-                                                } else {
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                OutlinedCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text(
-                                            stringResource(R.string.debloater_find_disabled_title),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            stringResource(R.string.debloater_find_disabled_desc),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Button(
-                                            onClick = {
-                                                checkedPackages.clear()
-                                                viewModel.scanDisabledPackages()
-                                            },
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan_disabled))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(stringResource(R.string.debloater_scan_disabled))
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    if (isRestoreTab) {
+                        Text(
+                            text = stringResource(R.string.debloater_apps_to_restore_format, activeItems.size),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
-                }
-
-                if (activeUiData.packages.isNotEmpty()) {
-                    item(key = "list_header") {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (isRestoreTab) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                allChecked = !allChecked
+                                visibleItems.forEach { checkedPackages[it.pkg] = allChecked }
+                            },
+                            enabled = visibleItems.isNotEmpty()
+                        ) {
                             Text(
-                                text = stringResource(R.string.debloater_apps_to_restore_format, activeUiData.packages.size),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                stringResource(
+                                    if (allChecked) R.string.debloater_deselect_all
+                                    else R.string.debloater_select_all
+                                )
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
                         }
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TextButton(
-                                onClick = {
-                                    allChecked = !allChecked
-                                    activeUiData.packages.forEach { checkedPackages[it] = allChecked }
-                                }
-                            ) {
-                                Text(
-                                    stringResource(
-                                        if (allChecked) R.string.debloater_deselect_all
-                                        else R.string.debloater_select_all
-                                    )
+                            if (!isRestoreTab) {
+                                FilterChip(
+                                    selected = hideDisabled,
+                                    onClick = { hideDisabled = !hideDisabled },
+                                    label = { Text(stringResource(R.string.debloater_hide_disabled)) }
                                 )
                             }
                             Text(
                                 text = pluralStringResource(
                                     R.plurals.debloater_package_count,
-                                    activeUiData.packages.size,
-                                    activeUiData.packages.size
+                                    visibleItems.size,
+                                    visibleItems.size
                                 ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
+                }
 
-                    items(
-                        items = activeUiData.packages,
-                        key = { pkg -> "$selectedTab:$pkg" }
-                    ) { pkg ->
-                        PackageRowItem(
-                            pkg = pkg,
-                            label = activeUiData.labels[pkg] ?: pkg,
-                            description = activeUiData.descriptions[pkg],
-                            risk = activeUiData.riskFactors[pkg]?.takeIf { it.isNotBlank() },
-                            checked = checkedPackages[pkg] ?: false,
-                            onCheckedChange = { checkedPackages[pkg] = it }
+                if (visibleItems.isEmpty() && !isRestoreTab && hideDisabled) {
+                    item(key = "all_hidden") {
+                        Text(
+                            text = stringResource(R.string.debloater_all_hidden_by_filter),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp)
                         )
                     }
                 }
-            }
 
-            if (activeUiData.packages.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    tonalElevation = 3.dp,
-                    shadowElevation = 4.dp
-                ) {
-                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                        if (isRestoreTab) {
-                            Button(
-                                onClick = {
-                                    val selected = activeUiData.packages.filter { checkedPackages[it] == true }
-                                    if (selected.isNotEmpty()) {
-                                        viewModel.restorePackages(selected)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.debloater_cd_restore))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(stringResource(R.string.debloater_restore_selected))
-                            }
-                        } else {
-                            val triggerAction = { isUninstall: Boolean ->
-                                val selected = activeUiData.packages.filter { checkedPackages[it] == true }
+                items(
+                    items = visibleItems,
+                    key = { item -> "$selectedTab:${item.pkg}" }
+                ) { item ->
+                    PackageRowItem(
+                        pkg = item.pkg,
+                        label = item.label,
+                        description = item.description,
+                        risk = item.risk,
+                        isDisabled = !isRestoreTab && item.pkg in disabledPackages,
+                        checked = checkedPackages[item.pkg] ?: false,
+                        onCheckedChange = { checkedPackages[item.pkg] = it }
+                    )
+                }
+            }
+        }
+
+        if (visibleItems.isNotEmpty()) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                tonalElevation = 3.dp,
+                shadowElevation = 4.dp
+            ) {
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    if (isRestoreTab) {
+                        Button(
+                            onClick = {
+                                val selected = visibleItems.map { it.pkg }.filter { checkedPackages[it] == true }
                                 if (selected.isNotEmpty()) {
-                                    val hasRisky = selected.any { !activeUiData.riskFactors[it].isNullOrBlank() }
-                                    if (hasRisky || (isLocalConnection && isUninstall)) {
-                                        pendingConfirmUninstall = isUninstall
-                                    } else {
-                                        viewModel.disablePackages(selected, isUninstall)
-                                    }
+                                    controller.restorePackages(selected)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.debloater_cd_restore))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.debloater_restore_selected))
+                        }
+                    } else {
+                        val selected = visibleItems.map { it.pkg }.filter { checkedPackages[it] == true }
+                        val disabledSelected = selected.filter { it in disabledPackages }
+                        val triggerAction = { isUninstall: Boolean ->
+                            if (selected.isNotEmpty()) {
+                                val hasRisky = selected.any { !activeByPkg[it]?.risk.isNullOrBlank() }
+                                if (hasRisky || (isLocalConnection && isUninstall)) {
+                                    pendingConfirmUninstall = isUninstall
+                                } else {
+                                    controller.disablePackages(selected, isUninstall)
+                                }
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (disabledSelected.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = { controller.restorePackages(disabledSelected) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.debloater_cd_restore))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(stringResource(R.string.debloater_restore_disabled_format, disabledSelected.size))
                                 }
                             }
                             Row(
@@ -552,9 +390,9 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 
     val confirmIsUninstall = pendingConfirmUninstall
     if (confirmIsUninstall != null) {
-        val selected = activeUiData.packages.filter { checkedPackages[it] == true }
+        val selected = visibleItems.map { it.pkg }.filter { checkedPackages[it] == true }
         val riskySelected = selected.mapNotNull { pkg ->
-            activeUiData.riskFactors[pkg]?.takeIf { it.isNotBlank() }?.let { pkg to it }
+            activeByPkg[pkg]?.risk?.let { risk -> pkg to risk }
         }
         AlertDialog(
             onDismissRequest = { pendingConfirmUninstall = null },
@@ -609,7 +447,7 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                     riskySelected.forEach { (pkg, risk) ->
                         Column(modifier = Modifier.padding(top = 4.dp)) {
                             Text(
-                                text = activeUiData.labels[pkg] ?: pkg,
+                                text = activeByPkg[pkg]?.label ?: pkg,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold
                             )
@@ -626,7 +464,7 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
                 Button(
                     onClick = {
                         pendingConfirmUninstall = null
-                        viewModel.disablePackages(selected, confirmIsUninstall)
+                        controller.disablePackages(selected, confirmIsUninstall)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
@@ -648,11 +486,216 @@ fun DebloaterScreen(viewModel: MainViewModel, onBack: () -> Unit) {
 }
 
 @Composable
+private fun GeneralBloatScanTab(
+    safetyLevel: String,
+    onSelectSafetyLevel: (String) -> Unit,
+    onScan: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.debloater_general_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            stringResource(R.string.debloater_general_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("recommended", "advanced", "unsafe").forEach { level ->
+                FilterChip(
+                    selected = safetyLevel == level,
+                    onClick = { onSelectSafetyLevel(level) },
+                    label = { Text(level.uppercase()) }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            onClick = onScan,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(stringResource(R.string.debloater_scan_bloat))
+        }
+    }
+}
+
+@Composable
+private fun TierScanTab(
+    title: String,
+    description: String,
+    scanButtonText: String,
+    selectedTier: Int,
+    onSelectTier: (Int) -> Unit,
+    onScan: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(1, 2, 3).forEach { tier ->
+                FilterChip(
+                    selected = selectedTier == tier,
+                    onClick = { onSelectTier(tier) },
+                    label = { Text(stringResource(R.string.debloater_tier_format, tier)) }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Button(
+            onClick = onScan,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(scanButtonText)
+        }
+    }
+}
+
+@Composable
+private fun RestoreControlsTab(
+    snapshotFeedback: String?,
+    onExportSnapshot: () -> Unit,
+    onImportSnapshot: () -> Unit,
+    onScanDisabled: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            stringResource(R.string.debloater_restore_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            stringResource(R.string.debloater_restore_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    stringResource(R.string.debloater_create_snapshot_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    stringResource(R.string.debloater_create_snapshot_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onExportSnapshot,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.debloater_cd_create_snapshot))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.debloater_save_snapshot))
+                }
+            }
+        }
+
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    stringResource(R.string.debloater_restore_snapshot_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    stringResource(R.string.debloater_restore_snapshot_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                FilledTonalButton(
+                    onClick = onImportSnapshot,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = stringResource(R.string.debloater_cd_upload_snapshot))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.debloater_upload_backup))
+                }
+                snapshotFeedback?.let { feedback ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = feedback,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (feedback.startsWith("Failed") || feedback.contains("Ignored")) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+        }
+
+        OutlinedCard(
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    stringResource(R.string.debloater_find_disabled_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    stringResource(R.string.debloater_find_disabled_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onScanDisabled,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.debloater_cd_scan_disabled))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.debloater_scan_disabled))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PackageRowItem(
     pkg: String,
     label: String,
     description: String?,
     risk: String?,
+    isDisabled: Boolean,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
@@ -667,8 +710,32 @@ private fun PackageRowItem(
             onCheckedChange = onCheckedChange
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Column {
-            Text(label, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = label,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (isDisabled) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.debloater_badge_disabled),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
             Text(pkg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!description.isNullOrBlank()) {
                 Text(description, style = MaterialTheme.typography.bodySmall)

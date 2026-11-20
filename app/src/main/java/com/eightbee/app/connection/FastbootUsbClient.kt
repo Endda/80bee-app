@@ -14,7 +14,22 @@ data class FastbootReply(
     val status: String,
     val message: String,
     val info: List<String> = emptyList()
-)
+) {
+    val isOkay: Boolean get() = status == "OKAY"
+
+    fun formatDisplay(): String = buildString {
+        info.forEach { line ->
+            append("INFO: ")
+            append(line)
+            append('\n')
+        }
+        append(status)
+        if (message.isNotBlank()) {
+            append(": ")
+            append(message)
+        }
+    }
+}
 
 internal interface FastbootTransport : Closeable {
     fun bulkWrite(buffer: ByteArray, offset: Int, length: Int, timeoutMs: Int): Int

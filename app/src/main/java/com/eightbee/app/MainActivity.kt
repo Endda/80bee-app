@@ -44,17 +44,7 @@ class MainActivity : ComponentActivity() {
             when (intent.action) {
                 ACTION_USB_PERMISSION -> {
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        device?.let {
-                            val attached = viewModel.otgManager.setDevice(it)
-                            if (attached && viewModel.activeConnection.value is OtgConnectionManager) {
-                                viewModel.refreshSettings()
-                            }
-                            if (viewModel.activeConnection.value !== viewModel.otgManager &&
-                                (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle || viewModel.patcherState.value.isActive)
-                            ) {
-                                viewModel.setActiveConnection(viewModel.otgManager)
-                            }
-                        }
+                        device?.let { activateOtgDevice(it) }
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -63,7 +53,7 @@ class MainActivity : ComponentActivity() {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     device?.let {
                         if (viewModel.otgManager.onDeviceDetached(it) &&
-                            viewModel.activeConnection.value is OtgConnectionManager
+                            viewModel.activeConnection.value === viewModel.otgManager
                         ) {
                             viewModel.setActiveConnection(null)
                         }
@@ -88,15 +78,15 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val activeConnection by viewModel.activeConnection.collectAsState()
-                    val bootloaderWizardState by viewModel.bootloaderWizardState.collectAsState()
-                    val patcherState by viewModel.patcherState.collectAsState()
+                    val bootloaderWizardState by viewModel.bootloaderWizardController.state.collectAsState()
+                    val patcherState by viewModel.magiskPatcherController.state.collectAsState()
 
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (patcherState.isActive) {
                             PixelMagiskPatcherScreen(
-                                viewModel = viewModel,
+                                controller = viewModel.magiskPatcherController,
                                 onDismiss = {
-                                    viewModel.clearPatcherState()
+                                    viewModel.magiskPatcherController.clearPatcherState()
                                 }
                             )
                         } else if (activeConnection == null) {
@@ -121,9 +111,10 @@ class MainActivity : ComponentActivity() {
 
                         if (bootloaderWizardState !is BootloaderWizardState.Idle) {
                             BootloaderWizardBottomSheet(
-                                viewModel = viewModel,
+                                controller = viewModel.bootloaderWizardController,
+                                activeConnection = activeConnection,
                                 onDismiss = {
-                                    viewModel.clearBootloaderWizardState()
+                                    viewModel.bootloaderWizardController.clear()
                                 }
                             )
                         }
@@ -149,32 +140,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun activateOtgDevice(device: UsbDevice) {
+        val attached = viewModel.otgManager.setDevice(device)
+        if (attached && viewModel.activeConnection.value === viewModel.otgManager) {
+            viewModel.deviceTweaksController.refreshSettings()
+        }
+        if (viewModel.activeConnection.value !== viewModel.otgManager &&
+            (viewModel.bootloaderWizardController.state.value !is BootloaderWizardState.Idle ||
+                viewModel.magiskPatcherController.state.value.isActive)
+        ) {
+            viewModel.setActiveConnection(viewModel.otgManager)
+        }
+    }
+
     private fun handleUsbDevice(device: UsbDevice) {
         Log.d("MainActivity", "handleUsbDevice: Inspecting device: Vendor=${device.vendorId}, Product=${device.productId}")
-        // Quick check to see if it might be an ADB or Fastboot device
-        var isAdbOrFastboot = false
-        for (i in 0 until device.interfaceCount) {
-            val intf = device.getInterface(i)
-            Log.d("MainActivity", "  Interface $i: class=${intf.interfaceClass}, subclass=${intf.interfaceSubclass}, protocol=${intf.interfaceProtocol}")
-            if (intf.interfaceClass == 255 && intf.interfaceSubclass == 66 && 
-                (intf.interfaceProtocol == 1 || intf.interfaceProtocol == 3)) {
-                isAdbOrFastboot = true
-                break
-            }
-        }
-
-        if (isAdbOrFastboot) {
+        if (OtgConnectionManager.isAdbOrFastbootDevice(device)) {
             Log.d("MainActivity", "  Device matches ADB/Fastboot interface! Has permission: ${usbManager.hasPermission(device)}")
             if (usbManager.hasPermission(device)) {
-                val attached = viewModel.otgManager.setDevice(device)
-                if (attached && viewModel.activeConnection.value is OtgConnectionManager) {
-                    viewModel.refreshSettings()
-                }
-                if (viewModel.activeConnection.value !== viewModel.otgManager &&
-                    (viewModel.bootloaderWizardState.value !is BootloaderWizardState.Idle || viewModel.patcherState.value.isActive)
-                ) {
-                    viewModel.setActiveConnection(viewModel.otgManager)
-                }
+                activateOtgDevice(device)
             } else {
                 Log.d("MainActivity", "  Requesting USB permission...")
                 val intent = Intent(ACTION_USB_PERMISSION).apply {

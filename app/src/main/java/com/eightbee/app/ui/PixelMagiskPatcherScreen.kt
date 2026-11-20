@@ -16,9 +16,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.MainViewModel
+import com.eightbee.app.FlashPhase
+import com.eightbee.app.MagiskExtractPhase
+import com.eightbee.app.PatchPhase
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
+import com.eightbee.app.features.MagiskPatcherController
 import com.eightbee.app.ui.patcher.StepConnectionRecon
 import com.eightbee.app.ui.patcher.StepFastbootFlash
 import com.eightbee.app.ui.patcher.StepFinalSetup
@@ -29,17 +32,17 @@ import com.eightbee.app.ui.patcher.StepPatching
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PixelMagiskPatcherScreen(
-    viewModel: MainViewModel,
+    controller: MagiskPatcherController,
     onDismiss: () -> Unit
 ) {
-    val state by viewModel.patcherState.collectAsState()
-    val isBusyWithCriticalStep = state.patchStatus == "EXECUTING_PATCH" ||
-        state.fastbootStatus == "STATUS: FLASHING_PARTITION"
+    val state by controller.state.collectAsState()
+    val isBusyWithCriticalStep = state.patchPhase is PatchPhase.InProgress ||
+        state.flashPhase == FlashPhase.Flashing
 
     BackHandler(enabled = true) {
         if (isBusyWithCriticalStep) return@BackHandler
         if (state.currentStep in 2..5) {
-            viewModel.goToPatcherStep(state.currentStep - 1)
+            controller.goToStep(state.currentStep - 1)
         } else {
             onDismiss()
         }
@@ -81,12 +84,12 @@ fun PixelMagiskPatcherScreen(
                     .fillMaxWidth()
             ) {
                 when (state.currentStep) {
-                    1 -> StepConnectionRecon(viewModel, state)
-                    2 -> StepFirmwareHandoff(viewModel, state)
-                    3 -> StepMagiskPrep(viewModel, state)
-                    4 -> StepPatching(viewModel, state)
-                    5 -> StepFastbootFlash(viewModel, state)
-                    6 -> StepFinalSetup(viewModel, state, onDismiss)
+                    1 -> StepConnectionRecon(controller, state)
+                    2 -> StepFirmwareHandoff(controller, state)
+                    3 -> StepMagiskPrep(controller, state)
+                    4 -> StepPatching(controller, state)
+                    5 -> StepFastbootFlash(controller, state)
+                    6 -> StepFinalSetup(controller, state, onDismiss)
                 }
             }
 
@@ -96,8 +99,8 @@ fun PixelMagiskPatcherScreen(
                 StepFooter(
                     currentStep = state.currentStep,
                     state = state,
-                    onPrev = { viewModel.goToPatcherStep(state.currentStep - 1) },
-                    onNext = { viewModel.goToPatcherStep(state.currentStep + 1) }
+                    onPrev = { controller.goToStep(state.currentStep - 1) },
+                    onNext = { controller.goToStep(state.currentStep + 1) }
                 )
             }
         }
@@ -156,9 +159,9 @@ private fun StepFooter(
     val isNextEnabled = when (currentStep) {
         1 -> state.deviceData != null
         2 -> state.bootFile != null
-        3 -> state.magiskComponentsReady
+        3 -> state.magiskExtractPhase == MagiskExtractPhase.Ready
         4 -> state.patchedFile != null
-        5 -> state.flashComplete
+        5 -> state.flashPhase == FlashPhase.Succeeded
         else -> true
     }
 

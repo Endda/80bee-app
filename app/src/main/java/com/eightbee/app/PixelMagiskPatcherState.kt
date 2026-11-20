@@ -20,42 +20,71 @@ data class LogEntry(
     val message: String
 )
 
+sealed interface ReconPhase {
+    object Idle : ReconPhase
+    object InProgress : ReconPhase
+    object Succeeded : ReconPhase
+    data class Failed(val message: String) : ReconPhase
+}
+
+sealed interface FirmwarePhase {
+    object Idle : FirmwarePhase
+    data class InProgress(val label: String, val progress: Float) : FirmwarePhase
+    object Loaded : FirmwarePhase
+    data class Failed(val message: String) : FirmwarePhase
+}
+
+sealed interface MagiskExtractPhase {
+    object Idle : MagiskExtractPhase
+    data class InProgress(val progress: Float) : MagiskExtractPhase
+    object Ready : MagiskExtractPhase
+    data class Failed(val message: String) : MagiskExtractPhase
+}
+
+sealed interface PatchPhase {
+    object Idle : PatchPhase
+    data class InProgress(val progress: Float, val label: String) : PatchPhase
+    object Succeeded : PatchPhase
+    data class Failed(val message: String) : PatchPhase
+}
+
+sealed interface FlashPhase {
+    object AwaitingHandshake : FlashPhase
+    object RebootSent : FlashPhase
+    object FastbootReady : FlashPhase
+    object Flashing : FlashPhase
+    object Succeeded : FlashPhase
+    data class Failed(val message: String) : FlashPhase
+}
+
 data class PixelMagiskPatcherState(
     val isActive: Boolean = false,
     val currentStep: Int = 1,
-    val isReconning: Boolean = false,
+    val reconPhase: ReconPhase = ReconPhase.Idle,
     val deviceData: MagiskDeviceData? = null,
-    
+
     // Phase 2
     val bootFile: File? = null,
     val bootFileName: String = "",
     val bootFileSize: String = "",
-    val integrityStatus: String = "READY_FOR_IMAGE",
-    val integrityProgress: Float = 0f,
+    val firmwarePhase: FirmwarePhase = FirmwarePhase.Idle,
     val imageWarning: String? = null,
-    val imageError: String? = null,
-    
+
     // Phase 3
     val magiskApkFile: File? = null,
-    val appStatus: String = "STATUS: IDLE",
-    val extractProgress: Float = 0f,
+    val magiskExtractPhase: MagiskExtractPhase = MagiskExtractPhase.Idle,
     val extractLogs: List<LogEntry> = emptyList(),
-    val magiskComponentsReady: Boolean = false,
-    
+
     // Phase 4
-    val patchStatus: String = "READY_FOR_PATCH",
-    val patchProgress: Float = 0f,
-    val patchProgressLabel: String = "",
+    val patchPhase: PatchPhase = PatchPhase.Idle,
     val patchLogs: List<LogEntry> = emptyList(),
     val patchedFile: File? = null,
-    
+
     // Phase 5
-    val fastbootStatus: String = "Awaiting Fastboot Handshake",
-    val flashStep: Int = 1, // 1: Reboot ADB, 2: Connect Fastboot, 3: Flash
+    val flashPhase: FlashPhase = FlashPhase.AwaitingHandshake,
     val isFastbootConnected: Boolean = false,
-    val flashComplete: Boolean = false,
     val showUnlockWarning: Boolean = false,
-    
+
     // Phase 6
     val finalApkInstalled: Boolean = false
 )

@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.eightbee.app.connection.ConnectionManager
+import com.eightbee.app.features.parsePmListPackages
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -117,12 +118,7 @@ class BackgroundOperationService : Service() {
                 _compileProgress.value = "Fetching installed packages..."
                 updateNotification()
                 val listOutput = conn.runShellCommand("pm list packages")
-                val packages = listOutput
-                    .split("\n")
-                    .map { it.trim() }
-                    .filter { it.startsWith("package:") }
-                    .map { it.substringAfter("package:") }
-                    .filter { it.isNotEmpty() }
+                val packages = parsePmListPackages(listOutput)
 
                 val total = packages.size
                 if (total == 0) {

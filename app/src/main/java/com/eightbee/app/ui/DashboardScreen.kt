@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
 import com.eightbee.app.Screen
-import com.eightbee.app.connection.OtgConnectionManager
 
 @Composable
 fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
@@ -41,7 +40,7 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
                 fontWeight = FontWeight.Bold
             )
             Row {
-                IconButton(onClick = { viewModel.refreshSettings() }) {
+                IconButton(onClick = { viewModel.deviceTweaksController.refreshSettings() }) {
                     Icon(
                         Icons.Filled.Refresh,
                         contentDescription = stringResource(R.string.cd_refresh_status)
@@ -77,11 +76,11 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (activeConnection is OtgConnectionManager) {
+        if (activeConnection?.supportsFastboot == true) {
             HomeLauncherCard(
                 title = stringResource(R.string.card_magisk_patcher_title),
                 description = stringResource(R.string.card_magisk_patcher_desc),
-                onClick = { viewModel.startPatcher() }
+                onClick = { viewModel.magiskPatcherController.startPatcher() }
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
