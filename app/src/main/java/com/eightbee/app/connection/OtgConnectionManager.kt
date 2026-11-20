@@ -2,6 +2,7 @@ package com.eightbee.app.connection
 
 import android.content.Context
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.util.Log
@@ -19,10 +20,27 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 
-class OtgConnectionManager(
-    private val context: Context,
-    private val usbManager: UsbManager
+class OtgConnectionManager internal constructor(
+    private val filesDirProvider: () -> File,
+    private val hasUsbPermission: (UsbDevice) -> Boolean = { false },
+    private val openUsbDevice: (UsbDevice) -> UsbDeviceConnection? = { null },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cryptoProvider: (() -> AdbCrypto?)? = null,
+    private val logSink: (isError: Boolean, tag: String, message: String) -> Unit = { isError, tag, message ->
+        if (isError) Log.e(tag, message) else Log.d(tag, message)
+    },
+    initialAdbConnection: AdbConnection? = null,
+    initialFastbootClient: FastbootUsbClient? = null
 ) : ConnectionManager {
+
+    constructor(
+        context: Context,
+        usbManager: UsbManager
+    ) : this(
+        filesDirProvider = { context.filesDir },
+        hasUsbPermission = { usbManager.hasPermission(it) },
+        openUsbDevice = { usbManager.openDevice(it) }
+    )
 
     companion object {
         private const val TAG = "OtgConnectionManager"
@@ -61,18 +79,21 @@ class OtgConnectionManager(
     private val stateLock = Any()
 
     @Volatile private var connectedDevice: UsbDevice? = null
-    @Volatile private var adbConnection: AdbConnection? = null
-    @Volatile private var fastbootClient: FastbootUsbClient? = null
+    @Volatile private var adbConnection: AdbConnection? = initialAdbConnection
+    @Volatile private var fastbootClient: FastbootUsbClient? = initialFastbootClient
     @Volatile private var connectionJob: Job? = null
     @Volatile private var pendingDisconnectJob: Job? = null
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     // Load/generate the 2048-bit RSA ADB keypair off the main thread; connectDevice() awaits this.
-    private val cryptoDeferred: Deferred<AdbCrypto?> = ioScope.async { loadOrGenerateCrypto() }
+    private val cryptoDeferred: Deferred<AdbCrypto?> = ioScope.async {
+        cryptoProvider?.invoke() ?: loadOrGenerateCrypto()
+    }
 
     private fun loadOrGenerateCrypto(): AdbCrypto? {
         val base64 = AdbBase64Impl()
-        val privateKey = File(context.filesDir, "private_key")
-        val publicKey = File(context.filesDir, "public_key")
+        val filesDir = filesDirProvider()
+        val privateKey = File(filesDir, "private_key")
+        val publicKey = File(filesDir, "public_key")
 
         var crypto: AdbCrypto? = if (privateKey.exists() && publicKey.exists()) {
             try {
@@ -89,14 +110,14 @@ class OtgConnectionManager(
                 crypto = AdbCrypto.generateAdbKeyPair(base64)
                 crypto?.saveAdbKeyPair(privateKey, publicKey)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to setup crypto", e)
+                logSink(true, TAG, "Failed to setup crypto: ${e.message}")
             }
         }
         return crypto
     }
 
     fun setDevice(device: UsbDevice?): Boolean {
-        Log.d(TAG, "setDevice: $device")
+        logSink(false, TAG, "setDevice: $device")
         if (device == null) {
             disconnect()
             return false
@@ -104,15 +125,15 @@ class OtgConnectionManager(
 
         val current = connectedDevice
         if (current != null &&
-            (current.deviceId == device.deviceId || current.deviceName == device.deviceName) &&
+            isSameDevice(current, device) &&
             _connectionState.value != ConnectionState.Disconnected
         ) {
-            Log.d(TAG, "Device ${device.deviceName} is already active/connecting; skipping reconnect")
+            logSink(false, TAG, "Device ${device.deviceName} is already active/connecting; skipping reconnect")
             return false
         }
 
-        if (usbManager.hasPermission(device)) {
-            Log.d(TAG, "Permission already granted for ${device.deviceName}")
+        if (hasUsbPermission(device)) {
+            logSink(false, TAG, "Permission already granted for ${device.deviceName}")
             if (current != null || adbConnection != null || fastbootClient != null) {
                 pendingDisconnectJob = disconnect()
             }
@@ -120,31 +141,60 @@ class OtgConnectionManager(
             connectDevice()
             return true
         } else {
-            Log.d(TAG, "Waiting for permission for ${device.deviceName}")
+            logSink(false, TAG, "Waiting for permission for ${device.deviceName}")
             return false
         }
     }
 
     fun onDeviceDetached(device: UsbDevice): Boolean {
         val current = connectedDevice ?: return false
-        if (current.deviceId != device.deviceId && current.deviceName != device.deviceName) {
-            Log.d(TAG, "Ignoring detach for unrelated USB device ${device.deviceName}")
+        if (!isSameDevice(current, device)) {
+            logSink(false, TAG, "Ignoring detach for unrelated USB device ${device.deviceName}")
             return false
         }
         disconnect()
         return true
     }
 
+    private fun isSameDevice(first: UsbDevice, second: UsbDevice): Boolean =
+        first.deviceId == second.deviceId || first.deviceName == second.deviceName
+
+    private fun clearConnectingDeviceIfCurrent(device: UsbDevice) {
+        synchronized(stateLock) {
+            if (connectedDevice == device) {
+                connectedDevice = null
+                _connectionState.value = ConnectionState.Disconnected
+            }
+        }
+    }
+
+    private inline fun commitConnectionIfCurrent(
+        device: UsbDevice,
+        active: Boolean,
+        targetState: ConnectionState,
+        assign: () -> Unit
+    ): Boolean {
+        synchronized(stateLock) {
+            if (connectedDevice == device && active) {
+                assign()
+                _isAvailableFlow.value = true
+                _connectionState.value = targetState
+                return true
+            }
+        }
+        return false
+    }
+
     private fun connectDevice() {
         val device = connectedDevice ?: return
-        Log.d(TAG, "connectDevice: Starting connection process for ${device.deviceName}")
-        Log.d(TAG, "Device details: Vendor=${device.vendorId}, Product=${device.productId}, Class=${device.deviceClass}")
-        Log.d(TAG, "Configuration count: ${device.configurationCount}")
+        logSink(false, TAG, "connectDevice: Starting connection process for ${device.deviceName}")
+        logSink(false, TAG, "Device details: Vendor=${device.vendorId}, Product=${device.productId}, Class=${device.deviceClass}")
+        logSink(false, TAG, "Configuration count: ${device.configurationCount}")
 
         val (adbInterface, fastbootInterface) = findInterfaces(device)
 
         if (adbInterface == null && fastbootInterface == null) {
-            Log.e(TAG, "Aborting: No ADB or Fastboot interface found")
+            logSink(true, TAG, "Aborting: No ADB or Fastboot interface found")
             return
         }
 
@@ -153,19 +203,14 @@ class OtgConnectionManager(
 
         connectionJob = ioScope.launch {
             pendingDisconnectJob?.join()
-            var openedConnection: android.hardware.usb.UsbDeviceConnection? = null
+            var openedConnection: UsbDeviceConnection? = null
             var pendingAdb: AdbConnection? = null
             var pendingFastboot: FastbootUsbClient? = null
             var committed = false
             try {
-                val connection = usbManager.openDevice(device) ?: run {
-                    Log.e(TAG, "Failed to open USB device connection")
-                    synchronized(stateLock) {
-                        if (connectedDevice == device) {
-                            connectedDevice = null
-                            _connectionState.value = ConnectionState.Disconnected
-                        }
-                    }
+                val connection = openUsbDevice(device) ?: run {
+                    logSink(true, TAG, "Failed to open USB device connection")
+                    clearConnectingDeviceIfCurrent(device)
                     return@launch
                 }
                 openedConnection = connection
@@ -176,13 +221,8 @@ class OtgConnectionManager(
 
                 if (adbInterface != null) {
                     val crypto = cryptoDeferred.await() ?: run {
-                        Log.e(TAG, "AdbCrypto not initialized")
-                        synchronized(stateLock) {
-                            if (connectedDevice == device) {
-                                connectedDevice = null
-                                _connectionState.value = ConnectionState.Disconnected
-                            }
-                        }
+                        logSink(true, TAG, "AdbCrypto not initialized")
+                        clearConnectingDeviceIfCurrent(device)
                         return@launch
                     }
 
@@ -191,36 +231,26 @@ class OtgConnectionManager(
                     pendingAdb = newAdbConnection
                     newAdbConnection.connect()
 
-                    synchronized(stateLock) {
-                        if (connectedDevice == device && isActive) {
-                            adbConnection = newAdbConnection
-                            committed = true
-                            _isAvailableFlow.value = true
-                            _connectionState.value = ConnectionState.AdbConnected
-                        }
+                    committed = commitConnectionIfCurrent(device, isActive, ConnectionState.AdbConnected) {
+                        adbConnection = newAdbConnection
                     }
                     if (committed) {
-                        Log.d(TAG, "ADB Connection successful for ${device.deviceName}")
+                        logSink(false, TAG, "ADB Connection successful for ${device.deviceName}")
                     }
                 } else if (fastbootInterface != null) {
                     val client = FastbootUsbClient(fastbootInterface, connection)
                     pendingFastboot = client
-                    synchronized(stateLock) {
-                        if (connectedDevice == device && isActive) {
-                            fastbootClient = client
-                            committed = true
-                            _isAvailableFlow.value = true
-                            _connectionState.value = ConnectionState.FastbootConnected
-                        }
+                    committed = commitConnectionIfCurrent(device, isActive, ConnectionState.FastbootConnected) {
+                        fastbootClient = client
                     }
                     if (committed) {
-                        Log.d(TAG, "Fastboot Connection successful for ${device.deviceName}")
+                        logSink(false, TAG, "Fastboot Connection successful for ${device.deviceName}")
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Connection failed for ${device.deviceName}", e)
+                logSink(true, TAG, "Connection failed for ${device.deviceName}: ${e.message}")
                 disconnect()
             } finally {
                 if (!committed) {
@@ -265,6 +295,72 @@ class OtgConnectionManager(
         }
     }
 
+    private fun requireAdbConnection(): AdbConnection =
+        adbConnection ?: throw IOException("ADB not connected.")
+
+    private fun requireFastbootClient(disconnectedMessage: String): FastbootUsbClient =
+        fastbootClient ?: throw IOException(disconnectedMessage)
+
+    private suspend inline fun <T> withWrappedIoError(
+        errorPrefix: String,
+        crossinline block: suspend CoroutineScope.() -> T
+    ): T = withContext(ioDispatcher) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            throw IOException("$errorPrefix: ${e.message}", e)
+        }
+    }
+
+    private inline fun <T> withAdbStream(
+        destination: String,
+        block: (AdbStream) -> T
+    ): T {
+        val connection = requireAdbConnection()
+        var stream: AdbStream? = null
+        return try {
+            stream = connection.open(destination)
+            block(stream)
+        } finally {
+            runCatching { stream?.close() }
+        }
+    }
+
+    private fun readStreamText(stream: AdbStream): String {
+        val output = StringBuilder()
+        readStreamFully(stream) { bytes ->
+            output.append(String(bytes, StandardCharsets.UTF_8))
+        }
+        return output.toString().trim()
+    }
+
+    private inline fun copyStreamToAdb(
+        input: InputStream,
+        stream: AdbStream,
+        onClosed: (Long) -> Unit = {},
+        onProgress: (Long) -> Unit = {}
+    ): Long {
+        var sent = 0L
+        val buffer = ByteArray(4096)
+        while (true) {
+            val bytesRead = input.read(buffer)
+            if (bytesRead == -1) break
+            if (stream.isClosed) {
+                onClosed(sent)
+                break
+            }
+            val chunk = if (bytesRead == buffer.size) buffer else buffer.copyOfRange(0, bytesRead)
+            stream.write(chunk)
+            sent += bytesRead
+            onProgress(sent)
+        }
+        return sent
+    }
+
     private fun readStreamFully(stream: AdbStream, onChunk: (ByteArray) -> Unit) {
         while (true) {
             try {
@@ -282,136 +378,67 @@ class OtgConnectionManager(
         }
     }
 
-    override suspend fun runShellCommand(command: String): String = withContext(Dispatchers.IO) {
-        val connection = adbConnection ?: throw IOException("ADB not connected.")
-        var stream: AdbStream? = null
-        try {
-            stream = connection.open("shell:$command")
-            val output = StringBuilder()
-            readStreamFully(stream) { bytes ->
-                output.append(String(bytes, StandardCharsets.UTF_8))
-            }
-            output.toString().trim()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Error executing via OTG: ${e.message}", e)
-        } finally {
-            try {
-                stream?.close()
-            } catch (_: Exception) {}
+    override suspend fun runShellCommand(command: String): String =
+        withWrappedIoError("Error executing via OTG") {
+            withAdbStream("shell:$command", ::readStreamText)
         }
-    }
 
-    override suspend fun runShellCommandWithInput(command: String, input: InputStream): String = withContext(Dispatchers.IO) {
-        val connection = adbConnection ?: throw IOException("ADB not connected.")
-        var stream: AdbStream? = null
-        var writerJob: Job? = null
-        try {
-            stream = connection.open("shell:$command")
-            val currentStream = stream
-            writerJob = launch {
-                try {
-                    val buffer = ByteArray(4096)
-                    var bytesRead: Int
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        if (currentStream.isClosed) break
-                        val chunk = if (bytesRead == buffer.size) buffer else buffer.copyOfRange(0, bytesRead)
-                        currentStream.write(chunk)
+    override suspend fun runShellCommandWithInput(command: String, input: InputStream): String =
+        withWrappedIoError("Error executing via OTG") {
+            withAdbStream("shell:$command") { stream ->
+                val writerJob = launch {
+                    try {
+                        copyStreamToAdb(input, stream)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logSink(true, TAG, "Error writing stream input: ${e.message}")
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error writing stream input", e)
+                }
+                try {
+                    val output = readStreamText(stream)
+                    writerJob.join()
+                    output
+                } finally {
+                    writerJob.cancel()
                 }
             }
-
-            val output = StringBuilder()
-            readStreamFully(stream) { bytes ->
-                output.append(String(bytes, StandardCharsets.UTF_8))
-            }
-            writerJob.join()
-            output.toString().trim()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Error executing via OTG: ${e.message}", e)
-        } finally {
-            writerJob?.cancel()
-            try {
-                stream?.close()
-            } catch (_: Exception) {}
         }
-    }
 
-    override suspend fun runShellCommandLive(command: String, onLineRead: (String) -> Unit): Unit = withContext(Dispatchers.IO) {
-        val connection = adbConnection ?: throw IOException("ADB not connected.")
-        var stream: AdbStream? = null
-        try {
-            stream = connection.open("shell:$command")
-            val buffer = StringBuilder()
-            readStreamFully(stream) { bytes ->
-                val chunk = String(bytes, StandardCharsets.UTF_8)
-                buffer.append(chunk)
+    override suspend fun runShellCommandLive(command: String, onLineRead: (String) -> Unit): Unit =
+        withWrappedIoError("Error executing via OTG") {
+            withAdbStream("shell:$command") { stream ->
+                val buffer = StringBuilder()
+                readStreamFully(stream) { bytes ->
+                    buffer.append(String(bytes, StandardCharsets.UTF_8))
 
-                var newlineIndex = buffer.indexOf("\n")
-                while (newlineIndex != -1) {
-                    val line = buffer.substring(0, newlineIndex)
-                    onLineRead(line)
-                    buffer.delete(0, newlineIndex + 1)
-                    newlineIndex = buffer.indexOf("\n")
+                    var newlineIndex = buffer.indexOf("\n")
+                    while (newlineIndex != -1) {
+                        onLineRead(buffer.substring(0, newlineIndex))
+                        buffer.delete(0, newlineIndex + 1)
+                        newlineIndex = buffer.indexOf("\n")
+                    }
+                }
+                if (buffer.isNotEmpty()) {
+                    onLineRead(buffer.toString())
                 }
             }
-            if (buffer.isNotEmpty()) {
-                onLineRead(buffer.toString())
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Error executing via OTG: ${e.message}", e)
-        } finally {
-            try {
-                stream?.close()
-            } catch (_: Exception) {}
         }
-    }
 
-    override suspend fun sendFastbootCommand(command: String): FastbootReply = withContext(Dispatchers.IO) {
-        val client = fastbootClient ?: throw IOException("No Fastboot OTG device connected or authorized.")
-
-        try {
-            client.sendCommand(command)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Error executing Fastboot via OTG: ${e.message}", e)
+    override suspend fun sendFastbootCommand(command: String): FastbootReply =
+        withWrappedIoError("Error executing Fastboot via OTG") {
+            requireFastbootClient("No Fastboot OTG device connected or authorized.").sendCommand(command)
         }
-    }
 
-    override suspend fun flashFastbootImage(partition: String, stream: InputStream, size: Long): String = withContext(Dispatchers.IO) {
-        val client = fastbootClient ?: throw IOException("No Fastboot OTG device connected.")
-        try {
+    override suspend fun flashFastbootImage(partition: String, stream: InputStream, size: Long): String =
+        withWrappedIoError("Error flashing via OTG") {
+            val client = requireFastbootClient("No Fastboot OTG device connected.")
             val result = client.flashImage(partition, stream, size)
             if (!result.startsWith("Successfully flashed")) {
                 throw IOException(result)
             }
             result
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Error flashing via OTG: ${e.message}", e)
         }
-    }
 
     override fun isAvailable(): Boolean {
         return adbConnection != null || fastbootClient != null
@@ -428,51 +455,35 @@ class OtgConnectionManager(
         size: Long,
         remotePath: String,
         onProgress: ((Long, Long) -> Unit)?
-    ): Unit = withContext(Dispatchers.IO) {
-        val connection = adbConnection ?: throw IOException("ADB not connected.")
+    ): Unit = withContext(ioDispatcher) {
+        requireAdbConnection()
         val quotedPath = quoteRemoteShellPath(remotePath)
-        var stream: AdbStream? = null
-        try {
-            Log.d(TAG, "pushFile: Opening stream to dd of=$quotedPath status=none...")
-            stream = connection.open("exec:dd of=$quotedPath status=none")
-            val currentStream = stream
-            var sent = 0L
-            val buffer = ByteArray(4096)
-            var bytesRead: Int
-            while (input.read(buffer).also { bytesRead = it } != -1) {
-                if (currentStream.isClosed) {
-                    throw IOException("Remote closed stream prematurely after $sent / $size bytes")
-                }
-                val chunk = if (bytesRead == buffer.size) buffer else buffer.copyOfRange(0, bytesRead)
-                currentStream.write(chunk)
-                sent += bytesRead
-                onProgress?.invoke(sent, size)
-            }
-
+        logSink(false, TAG, "pushFile: Opening stream to dd of=$quotedPath status=none...")
+        // Closing the stream inside withAdbStream delivers EOF (CLSE) to dd's stdin so it exits cleanly.
+        withAdbStream("exec:dd of=$quotedPath status=none") { stream ->
+            val sent = copyStreamToAdb(
+                input = input,
+                stream = stream,
+                onClosed = { sentSoFar ->
+                    throw IOException("Remote closed stream prematurely after $sentSoFar / $size bytes")
+                },
+                onProgress = { sentSoFar -> onProgress?.invoke(sentSoFar, size) }
+            )
             if (sent != size) {
                 throw IOException("Push incomplete for $remotePath: sent $sent of $size bytes")
             }
-
-            // Closing the stream delivers EOF (CLSE) to dd's stdin so it exits cleanly.
-            currentStream.close()
-            stream = null
-
-            var remoteSize: Long? = null
-            for (attempt in 0 until 15) {
-                remoteSize = statRemoteSize(remotePath)
-                if (remoteSize == size) break
-                delay(100)
-            }
-            if (remoteSize != size) {
-                throw IOException("Push size verification failed for $remotePath: expected $size bytes, got ${remoteSize ?: "unknown"}")
-            }
-            Log.d(TAG, "pushFile: Verified $size bytes written to $remotePath")
-        } finally {
-            try {
-                stream?.close()
-            } catch (_: Exception) {}
         }
-        Unit
+
+        var remoteSize: Long? = null
+        for (attempt in 0 until 15) {
+            remoteSize = statRemoteSize(remotePath)
+            if (remoteSize == size) break
+            delay(100)
+        }
+        if (remoteSize != size) {
+            throw IOException("Push size verification failed for $remotePath: expected $size bytes, got ${remoteSize ?: "unknown"}")
+        }
+        logSink(false, TAG, "pushFile: Verified $size bytes written to $remotePath")
     }
 
     override suspend fun pullFile(
@@ -480,8 +491,8 @@ class OtgConnectionManager(
         destination: File,
         maxBytes: Long,
         onProgress: ((Long) -> Unit)?
-    ): Unit = withContext(Dispatchers.IO) {
-        val connection = adbConnection ?: throw IOException("ADB not connected.")
+    ): Unit = withContext(ioDispatcher) {
+        requireAdbConnection()
         val quotedPath = quoteRemoteShellPath(remotePath)
         val expectedSize = statRemoteSize(remotePath)
             ?: throw IOException("Unable to stat remote file before pull: $remotePath")
@@ -489,30 +500,26 @@ class OtgConnectionManager(
             throw IOException("Unexpected remote file size for $remotePath: $expectedSize bytes")
         }
 
-        var stream: AdbStream? = null
         try {
-            stream = connection.open("exec:cat $quotedPath")
-            var received = 0L
-            destination.outputStream().buffered().use { out ->
-                readStreamFully(stream) { bytes ->
-                    received += bytes.size
-                    if (received > maxBytes) {
-                        throw IOException("Pulled file exceeded maximum allowed size ($maxBytes bytes)")
+            withAdbStream("exec:cat $quotedPath") { stream ->
+                var received = 0L
+                destination.outputStream().buffered().use { out ->
+                    readStreamFully(stream) { bytes ->
+                        received += bytes.size
+                        if (received > maxBytes) {
+                            throw IOException("Pulled file exceeded maximum allowed size ($maxBytes bytes)")
+                        }
+                        out.write(bytes)
+                        onProgress?.invoke(received)
                     }
-                    out.write(bytes)
-                    onProgress?.invoke(received)
                 }
-            }
-            if (received != expectedSize) {
-                throw IOException("Pull size verification failed for $remotePath: expected $expectedSize bytes, got $received")
+                if (received != expectedSize) {
+                    throw IOException("Pull size verification failed for $remotePath: expected $expectedSize bytes, got $received")
+                }
             }
         } catch (e: Exception) {
             destination.delete()
             throw e
-        } finally {
-            try {
-                stream?.close()
-            } catch (_: Exception) {}
         }
     }
 }
