@@ -24,3 +24,4 @@ keystore.properties
 
 # Local documentation
 docs/
+.agents/skills/
