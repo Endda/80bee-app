@@ -8,9 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -81,27 +79,11 @@ internal fun StepConnectionRecon(controller: MagiskPatcherController, state: Pix
         val reconPhase = state.reconPhase
         if (reconPhase is ReconPhase.Failed) {
             val displayMsg = reconPhase.message.ifBlank { stringResource(R.string.patcher_recon_failed_default) }
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Warning,
-                        contentDescription = stringResource(R.string.cd_error),
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Text(
-                        text = displayMsg,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            }
+            PatcherAlertCard(
+                message = displayMsg,
+                iconContentDescription = stringResource(R.string.cd_error),
+                tone = PatcherAlertTone.Error
+            )
         }
 
         Icon(
@@ -178,54 +160,22 @@ internal fun StepConnectionRecon(controller: MagiskPatcherController, state: Pix
             }
 
             if (device.isBeta) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Info,
-                            contentDescription = stringResource(R.string.patcher_cd_beta_warning),
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = stringResource(R.string.patcher_beta_warning),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
+                PatcherAlertCard(
+                    message = stringResource(R.string.patcher_beta_warning),
+                    iconContentDescription = stringResource(R.string.patcher_cd_beta_warning),
+                    tone = PatcherAlertTone.Info
+                )
             }
 
             if (!device.isUnlocked) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Warning,
-                            contentDescription = stringResource(R.string.cd_warning),
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            text = stringResource(
-                                if (!device.oemAllowed) R.string.patcher_unlock_warn_oem_disabled
-                                else R.string.patcher_unlock_warn_oem_allowed
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
+                PatcherAlertCard(
+                    message = stringResource(
+                        if (!device.oemAllowed) R.string.patcher_unlock_warn_oem_disabled
+                        else R.string.patcher_unlock_warn_oem_allowed
+                    ),
+                    iconContentDescription = stringResource(R.string.cd_warning),
+                    tone = PatcherAlertTone.Error
+                )
             }
         }
     }

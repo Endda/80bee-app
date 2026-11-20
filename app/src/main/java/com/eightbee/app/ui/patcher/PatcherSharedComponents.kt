@@ -10,6 +10,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -120,6 +124,58 @@ internal fun WorkflowItem(
                 Spacer(modifier = Modifier.height(8.dp))
                 content()
             }
+        }
+    }
+}
+
+internal enum class PatcherAlertTone {
+    Error,
+    Info
+}
+
+@Composable
+internal fun PatcherAlertCard(
+    message: String,
+    iconContentDescription: String,
+    tone: PatcherAlertTone,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = when (tone) {
+        PatcherAlertTone.Error -> MaterialTheme.colorScheme.errorContainer
+        PatcherAlertTone.Info -> MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = when (tone) {
+        PatcherAlertTone.Error -> MaterialTheme.colorScheme.onErrorContainer
+        PatcherAlertTone.Info -> MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    val iconTint = when (tone) {
+        PatcherAlertTone.Error -> MaterialTheme.colorScheme.error
+        PatcherAlertTone.Info -> MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    val icon = when (tone) {
+        PatcherAlertTone.Error -> Icons.Filled.Warning
+        PatcherAlertTone.Info -> Icons.Filled.Info
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = iconContentDescription,
+                tint = iconTint
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor
+            )
         }
     }
 }
