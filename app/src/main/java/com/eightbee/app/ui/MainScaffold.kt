@@ -92,11 +92,13 @@ fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
                     )
                     Screen.BatteryDiagnostic -> BatteryDiagnosticScreen(
                         controller = viewModel.deviceTweaksController,
+                        backgroundOperations = viewModel.backgroundOperations,
                         onBack = onBack
                     )
                     Screen.BatteryOptimizer -> BatteryOptimizerScreen(
                         tweaksController = viewModel.deviceTweaksController,
                         optimizerController = viewModel.batteryOptimizerController,
+                        backgroundOperations = viewModel.backgroundOperations,
                         activeConnection = activeConnection,
                         onBack = onBack
                     )

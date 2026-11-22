@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import com.eightbee.app.BatteryOptimizerState
 import com.eightbee.app.R
 import com.eightbee.app.connection.ConnectionManager
+import com.eightbee.app.features.BackgroundOperationCoordinator
 import com.eightbee.app.features.BatteryOptimizerController
 import com.eightbee.app.features.DeviceTweaksController
 
@@ -92,6 +93,7 @@ private val SAMSUNG_OEM_TOGGLES = listOf(
 fun BatteryOptimizerScreen(
     tweaksController: DeviceTweaksController,
     optimizerController: BatteryOptimizerController,
+    backgroundOperations: BackgroundOperationCoordinator,
     activeConnection: ConnectionManager?,
     onBack: () -> Unit
 ) {
@@ -102,8 +104,8 @@ fun BatteryOptimizerScreen(
         optimizerController.refreshState()
     }
 
-    val compileProgress by tweaksController.compileProgress.collectAsState()
-    val isCompiling by tweaksController.isCompiling.collectAsState()
+    val compileProgress by backgroundOperations.compileProgress.collectAsState()
+    val isCompiling by backgroundOperations.isCompiling.collectAsState()
     val startCompileWithPermission = rememberNotificationPermissionLauncher {
         tweaksController.startArtCompilation()
     }

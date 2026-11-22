@@ -5,8 +5,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.BootMode
 import com.eightbee.app.R
+import com.eightbee.app.features.BootMode
 import com.eightbee.app.features.DeviceTweaksController
 
 @Composable

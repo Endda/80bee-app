@@ -140,12 +140,7 @@ class SideloadController internal constructor(
                 }
 
                 val targetDeviceSdk = runCatching {
-                    connectionProvider()
-                        ?.takeIf { it.isAvailable() }
-                        ?.runShellCommand("getprop ro.build.version.sdk")
-                        ?.trim()
-                        ?.toIntOrNull()
-                        ?: 0
+                    connectionProvider()?.takeIf { it.isAvailable() }?.sdkInt() ?: 0
                 }.getOrDefault(0)
 
                 _state.value = SideloadState.ConfigReady(

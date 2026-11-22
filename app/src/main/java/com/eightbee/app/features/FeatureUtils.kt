@@ -16,6 +16,10 @@ internal const val MAX_BOOT_IMAGE_BYTES = 512L * 1024 * 1024
 internal const val MAX_MAGISK_APK_BYTES = 256L * 1024 * 1024
 internal const val MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024
 
+/** The target device's API level, or 0 when `ro.build.version.sdk` is missing or unparsable. */
+internal suspend fun ConnectionManager.sdkInt(): Int =
+    runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
+
 internal fun copyBounded(
     input: InputStream,
     output: OutputStream,

@@ -5,8 +5,6 @@ import android.app.Application
 import android.content.Intent
 import android.os.Build
 import com.eightbee.app.BackgroundOperationService
-import com.eightbee.app.BootMode
-import com.eightbee.app.DeviceSettings
 import com.eightbee.app.connection.ConnectionManager
 import com.eightbee.app.connection.ConnectionState
 import kotlinx.coroutines.CancellationException
@@ -20,20 +18,31 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+data class DeviceSettings(
+    val privateDnsMode: String = "unknown",
+    val privateDnsHostname: String = "",
+    val windowAnimationScale: String = "1.0",
+    val transitionAnimationScale: String = "1.0",
+    val animatorDurationScale: String = "1.0",
+    val adaptiveBatteryEnabled: Boolean = true
+)
+
+enum class BootMode(val shellCommand: String, val label: String) {
+    SYSTEM("reboot", "Rebooting to system..."),
+    RECOVERY("reboot recovery", "Rebooting to recovery..."),
+    BOOTLOADER("reboot bootloader", "Rebooting to bootloader..."),
+    FASTBOOTD("reboot fastboot", "Rebooting to fastbootd...")
+}
+
 /** Handles device tweaks, settings refresh, service triggers, and Termux HA deployment. */
 class DeviceTweaksController(
     private val application: Application,
     private val scope: CoroutineScope,
     private val connectionProvider: () -> ConnectionManager?,
-    private val backgroundOperations: BackgroundOperationCoordinator,
     private val runner: CommandRunner
 ) {
     private val _settings = MutableStateFlow(DeviceSettings())
     val settings: StateFlow<DeviceSettings> = _settings.asStateFlow()
-    val compileProgress: StateFlow<String> get() = backgroundOperations.compileProgress
-    val isCompiling: StateFlow<Boolean> get() = backgroundOperations.isCompiling
-    val batteryTelemetry: StateFlow<String> get() = backgroundOperations.batteryTelemetry
-    val isMonitoringBattery: StateFlow<Boolean> get() = backgroundOperations.isMonitoringBattery
     private var refreshSettingsJob: Job? = null
 
     fun refreshSettings() {
@@ -168,26 +177,15 @@ class DeviceTweaksController(
     }
 
     // --- Bluetooth Repair ---
-    fun executeBluetoothRepair(oemOverride: String, isAdvanced: Boolean) {
+    fun executeBluetoothRepair(oem: BluetoothOem, isAdvanced: Boolean) {
         runner.run("Starting Bluetooth Repair...") { conn ->
             runner.show("Disabling Bluetooth...")
             conn.runShellCommand("cmd bluetooth_manager disable || svc bluetooth disable")
             delay(2000)
 
-            val packages = mutableListOf(
-                "com.android.bluetooth",
-                "com.android.bluetoothmidiservice",
-                "com.google.android.bluetooth"
-            )
-            if (isAdvanced) {
-                packages.add("com.android.networkstack")
-            }
-            when (oemOverride) {
-                "samsung" -> packages.add("com.samsung.android.bluetooth")
-                "xiaomi" -> packages.addAll(listOf("com.miui.bluetooth", "com.xiaomi.bluetooth", "com.xiaomi.bluetooth.overlay"))
-                "oneplus" -> packages.addAll(listOf("com.oplus.bluetooth", "com.coloros.bluetooth", "com.nearme.bluetooth"))
-                "motorola" -> packages.addAll(listOf("com.motorola.bluetooth", "com.motorola.bt"))
-            }
+            val packages = STOCK_BLUETOOTH_PACKAGES +
+                (if (isAdvanced) listOf("com.android.networkstack") else emptyList()) +
+                oem.repairPackages
 
             for (pkg in packages) {
                 if (isAdvanced) {
@@ -200,7 +198,7 @@ class DeviceTweaksController(
             }
 
             if (isAdvanced) {
-                val sdkInt = conn.runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
+                val sdkInt = conn.sdkInt()
                 if (sdkInt >= Build.VERSION_CODES.R) {
                     runner.show("Cycling radios via Airplane Mode...")
                     val originalApState = conn.runShellCommand("settings get global airplane_mode_on").trim().toIntOrNull() ?: 0
@@ -230,16 +228,11 @@ class DeviceTweaksController(
         }
     }
 
-    fun applyBluetoothQuirk(oem: String) {
-        val targetPackages = when (oem) {
-            "xiaomi" -> listOf("com.android.bluetooth", "com.xiaomi.bluetooth", "com.miui.bluetooth")
-            "oneplus" -> listOf("com.android.bluetooth", "com.oplus.bluetooth", "com.coloros.bluetooth", "com.nearme.bluetooth")
-            else -> return
-        }
-
-        runner.run("Applying ${oem.uppercase()} Bluetooth Doze & background exemptions...") { conn ->
+    fun applyBluetoothQuirk(oem: BluetoothOem) {
+        val quirk = oem.quirk ?: return
+        runner.run("Applying ${oem.name} Bluetooth Doze & background exemptions...") { conn ->
             val exempted = mutableListOf<String>()
-            for (pkg in targetPackages) {
+            for (pkg in quirk.packages) {
                 val pathOutput = conn.runShellCommand("pm path $pkg")
                 if (pathOutput.contains("package:")) {
                     conn.runShellCommand("dumpsys deviceidle whitelist +$pkg")
@@ -250,7 +243,7 @@ class DeviceTweaksController(
             if (exempted.isNotEmpty()) {
                 "Exempted ${exempted.size} Bluetooth package(s):\n${exempted.joinToString("\n")}"
             } else {
-                "No matching Bluetooth packages found for ${oem.uppercase()}."
+                "No matching Bluetooth packages found for ${oem.name}."
             }
         }
     }
@@ -258,8 +251,7 @@ class DeviceTweaksController(
     // --- Audio Mods ---
     fun executeAudioBypass() {
         runner.run("Applying Audio Safety Bypass...") { conn ->
-            val targetApiLevel = conn.runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
-            if (targetApiLevel >= 34) {
+            if (conn.sdkInt() >= 34) {
                 conn.runShellCommand("settings put global audio_safe_csd_next_warning 999999.0")
             }
             conn.runShellCommand("settings put global safe_media_volume_enabled 0")
@@ -375,6 +367,12 @@ class DeviceTweaksController(
     }
 
     companion object {
+        private val STOCK_BLUETOOTH_PACKAGES = listOf(
+            "com.android.bluetooth",
+            "com.android.bluetoothmidiservice",
+            "com.google.android.bluetooth"
+        )
+
         private val SETTINGS_QUERIES = linkedMapOf(
             "dns_mode" to "settings get global private_dns_mode",
             "dns_host" to "settings get global private_dns_specifier",
