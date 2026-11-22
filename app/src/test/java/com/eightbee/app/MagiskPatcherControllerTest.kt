@@ -282,7 +282,6 @@ class MagiskPatcherControllerTest {
         assertTrue(firstFile.exists())
 
         // Loading a second valid image replaces and deletes the previous cached file
-        Thread.sleep(5)
         controller.loadBootFile("init_boot_2.img", initBootBytes.size.toLong()) {
             ByteArrayInputStream(initBootBytes)
         }
@@ -298,6 +297,23 @@ class MagiskPatcherControllerTest {
         assertTrue(controller.state.value.firmwarePhase is FirmwarePhase.Failed)
         assertNull(controller.state.value.bootFile)
         assertEquals(listOf(secondFile.name), cacheDir.listFiles()?.map { it.name })
+    }
+
+    @Test
+    fun loadBootFile_backToBackLoadsNeverClobberTheLoadedFile() = runBlocking {
+        val cacheDir = tempFolder.newFolder("rapid_cache")
+        val conn = FakePatcherConnection(shellResponder = { reconShellOutput(firstApi = "34") })
+        val controller = createController(this, cacheDir) { conn }
+        controller.startPatcher()
+
+        val goodBytes = buildBootHeader(kernelSize = 0, ramdiskSize = 16384)
+        val badBytes = "BAD_IMAGE".repeat(16).toByteArray()
+        repeat(50) {
+            controller.loadBootFile("init_boot.img", goodBytes.size.toLong()) { ByteArrayInputStream(goodBytes) }
+            val loaded = controller.state.value.bootFile!!
+            controller.loadBootFile("bad.img", badBytes.size.toLong()) { ByteArrayInputStream(badBytes) }
+            assertTrue("loaded file deleted by a failed load in the same millisecond", loaded.exists())
+        }
     }
 
     @Test

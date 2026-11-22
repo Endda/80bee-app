@@ -74,7 +74,7 @@ class SideloadController internal constructor(
                                         throw IOException("Archive contains too many APK files.")
                                     }
                                     val baseName = File(entry.name).name
-                                    val tempFile = File(app.cacheDir, "sideload_${System.currentTimeMillis()}_$baseName")
+                                    val tempFile = File.createTempFile("sideload_", "_$baseName", app.cacheDir)
                                     tempFiles.add(tempFile)
                                     if (baseName.equals("base.apk", ignoreCase = true) && explicitBaseApk == null) {
                                         explicitBaseApk = tempFile
@@ -89,7 +89,7 @@ class SideloadController internal constructor(
                         }
                     }
                 } else {
-                    val tempFile = File(app.cacheDir, "sideload_${System.currentTimeMillis()}_${File(fileName).name}")
+                    val tempFile = File.createTempFile("sideload_", "_${File(fileName).name}", app.cacheDir)
                     tempFiles.add(tempFile)
                     val apkStream = contentResolver.openInputStream(uri)
                         ?: throw IOException("Unable to open selected APK file.")
