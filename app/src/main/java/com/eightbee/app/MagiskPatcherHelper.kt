@@ -202,7 +202,7 @@ object MagiskPatcherHelper {
                     }
                     isTargetImageEntry(entryName, desiredImageName) -> {
                         onProgress("EXTRACTING_BOOT_IMAGE", progressBase)
-                        val outFile = File(cacheDir, "${entryName.substringBeforeLast('.')}_${System.currentTimeMillis()}.img")
+                        val outFile = File.createTempFile("${entryName.substringBeforeLast('.')}_", ".img", cacheDir)
                         copyEntryToFile(zis, outFile, entry.size) { frac ->
                             onProgress("EXTRACTING_BOOT_IMAGE", progressBase + frac * progressSpan)
                         }

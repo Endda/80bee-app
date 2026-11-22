@@ -242,7 +242,8 @@ class MagiskPatcherController internal constructor(
                     }
                 } else {
                     val tempImg = copyStreamToCacheFile(
-                        fileName = "boot_${System.currentTimeMillis()}.img",
+                        prefix = "boot_",
+                        suffix = ".img",
                         budget = MAX_BOOT_IMAGE_BYTES,
                         openErrorMessage = "Unable to open selected image file.",
                         overflowMessage = "Selected image exceeds the 512 MB boot image limit.",
@@ -308,7 +309,8 @@ class MagiskPatcherController internal constructor(
             var tempApkFile: File? = null
             try {
                 tempApkFile = copyStreamToCacheFile(
-                    fileName = "magisk_temp_${System.currentTimeMillis()}.apk",
+                    prefix = "magisk_temp_",
+                    suffix = ".apk",
                     budget = MAX_MAGISK_APK_BYTES,
                     openErrorMessage = "Unable to open selected Magisk APK.",
                     overflowMessage = "Selected Magisk APK exceeds the 256 MB limit.",
@@ -411,7 +413,7 @@ class MagiskPatcherController internal constructor(
 
                 patchStep(0.85f, "Pulling patched image...", log = "Pulling patched image to host...")
                 val remotePatchedPath = "$workspace/new-boot.img"
-                val patchedFile = File(cacheDirProvider(), "patched_boot_${System.currentTimeMillis()}.img")
+                val patchedFile = File.createTempFile("patched_boot_", ".img", cacheDirProvider())
                 try {
                     connection.pullFile(
                         remotePath = remotePatchedPath,
@@ -582,13 +584,14 @@ class MagiskPatcherController internal constructor(
     }
 
     private fun copyStreamToCacheFile(
-        fileName: String,
+        prefix: String,
+        suffix: String,
         budget: Long,
         openErrorMessage: String,
         overflowMessage: String,
         openStream: () -> InputStream?
     ): File {
-        val tempFile = File(cacheDirProvider(), fileName)
+        val tempFile = File.createTempFile(prefix, suffix, cacheDirProvider())
         try {
             val inputStream = openStream() ?: throw IllegalStateException(openErrorMessage)
             inputStream.use { input ->
