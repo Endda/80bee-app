@@ -135,7 +135,8 @@ fun AlertBanner(
     tone: AlertTone,
     modifier: Modifier = Modifier,
     title: String? = null,
-    iconContentDescription: String? = null
+    iconContentDescription: String? = null,
+    prominent: Boolean = false
 ) {
     val colors = alertColors(tone)
     Card(
@@ -143,7 +144,7 @@ fun AlertBanner(
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(if (prominent) 16.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -158,14 +159,14 @@ fun AlertBanner(
                 if (title != null) {
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = if (prominent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = colors.title
                     )
                 }
                 Text(
                     text = message,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = if (prominent) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
                     color = colors.content
                 )
             }

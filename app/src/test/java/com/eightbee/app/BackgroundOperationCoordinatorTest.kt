@@ -245,6 +245,28 @@ class BackgroundOperationCoordinatorTest {
     }
 
     @Test
+    fun startCompile_inCancelledScope_doesNotLeaveSlotStuckActive() = runBlocking {
+        withTimeout(5_000L) {
+            val coordinator = createCoordinator()
+            coordinator.connectionManager = FakeConnectionManager { cmd ->
+                if (cmd == "pm list packages") "package:com.alpha" else ""
+            }
+            val deadScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).apply { cancel() }
+            coordinator.startCompile(deadScope)
+            assertFalse(coordinator.isCompiling.value)
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                coordinator.startCompile(scope)
+                scope.awaitIdle()
+                assertEquals("Compilation complete! Compiled 1 apps.", coordinator.compileProgress.value)
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
     fun cancelAll_resetsActiveFlagsWithoutOverwritingStatus() = runBlocking {
         withTimeout(5_000L) {
             val entered = CompletableDeferred<Unit>()

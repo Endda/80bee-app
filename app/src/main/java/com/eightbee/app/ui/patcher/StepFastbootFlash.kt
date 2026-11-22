@@ -51,7 +51,8 @@ internal fun StepFastbootFlash(controller: MagiskPatcherController, state: Pixel
             AlertBanner(
                 title = stringResource(R.string.patcher_unlock_alert_title),
                 message = stringResource(R.string.patcher_unlock_alert_desc),
-                tone = AlertTone.Error
+                tone = AlertTone.Error,
+                prominent = true
             )
         }
 

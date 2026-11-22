@@ -58,7 +58,7 @@ class BackgroundOperationCoordinator internal constructor(
     val batteryTelemetry: StateFlow<String> = slots.getValue(BackgroundOpKind.BATTERY_MONITOR).status.asStateFlow()
     val isMonitoringBattery: StateFlow<Boolean> = slots.getValue(BackgroundOpKind.BATTERY_MONITOR).isActive.asStateFlow()
 
-    fun hasActiveOperations(): Boolean = slots.values.any { slot ->
+    internal fun hasActiveOperations(): Boolean = slots.values.any { slot ->
         synchronized(slot) { slot.isActive.value }
     }
 
@@ -158,35 +158,35 @@ class BackgroundOperationCoordinator internal constructor(
                     }
                 }
 
-                val conn = connectionManager
-                if (conn == null || !conn.isAvailable()) {
-                    synchronized(slot) {
-                        if (slot.job === launchedJob) {
-                            slot.status.value = "Error: Connection not active."
-                            slot.job = null
-                            slot.isActive.value = false
-                        }
-                    }
-                    return@launch
-                }
-
                 try {
+                    val conn = connectionManager
+                    if (conn == null || !conn.isAvailable()) {
+                        updateIfCurrent("Error: Connection not active.")
+                        return@launch
+                    }
                     block(conn, updateIfCurrent)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     updateIfCurrent("${kind.errorPrefix}${e.message ?: "Operation failed"}")
                 } finally {
-                    synchronized(slot) {
-                        if (slot.job === launchedJob) {
-                            slot.job = null
-                            slot.isActive.value = false
-                        }
-                    }
+                    releaseSlotIfCurrent(slot, launchedJob)
                 }
             }
             slot.job = launchedJob
         }
+        // Backstop for a job that never runs its body (e.g. launched into an already-cancelled
+        // scope), so the slot can't stay active forever in this Application-lifetime coordinator.
+        launchedJob.invokeOnCompletion { releaseSlotIfCurrent(slot, launchedJob) }
         launchedJob.start()
+    }
+
+    private fun releaseSlotIfCurrent(slot: OpSlot, job: Job) {
+        synchronized(slot) {
+            if (slot.job === job) {
+                slot.job = null
+                slot.isActive.value = false
+            }
+        }
     }
 }

@@ -84,7 +84,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val navStack = mutableListOf(Screen.Dashboard)
 
     private val backgroundOperations: BackgroundOperationCoordinator =
-        (application as? EightBeeApplication)?.backgroundOperations ?: BackgroundOperationCoordinator()
+        (application as EightBeeApplication).backgroundOperations
 
     val deviceTweaksController = DeviceTweaksController(
         application = application,
