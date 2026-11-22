@@ -39,8 +39,7 @@ fun AudioModsScreen(controller: DeviceTweaksController, onBack: () -> Unit) {
                     ActionEmphasis.Tonal,
                     onClick = { controller.restoreAudioDefaults() }
                 )
-            ),
-            buttonSpacing = 12.dp
+            )
         )
     }
 }

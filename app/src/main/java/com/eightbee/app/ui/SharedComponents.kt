@@ -142,8 +142,7 @@ class ToolAction(
 @Composable
 fun ToolActionList(
     actions: List<ToolAction>,
-    dividerSpacing: Dp = 16.dp,
-    buttonSpacing: Dp = 8.dp
+    dividerSpacing: Dp = 16.dp
 ) {
     actions.forEachIndexed { index, action ->
         if (index > 0) {
@@ -160,7 +159,7 @@ fun ToolActionList(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(buttonSpacing))
+            Spacer(modifier = Modifier.height(8.dp))
             val buttonModifier = Modifier.fillMaxWidth()
             val label: @Composable RowScope.() -> Unit = { Text(stringResource(action.buttonRes)) }
             when (action.emphasis) {
