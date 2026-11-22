@@ -32,10 +32,13 @@ class CommandRunner(
 
     private val mutex = Mutex()
 
+    /**
+     * Runs [block] exclusively, showing [initialStatus] while it works and its result (or error) when done.
+     * [afterSuccess] runs after the result is reported; if it throws, the error replaces the result.
+     */
     fun run(
         initialStatus: String,
-        notifySnackbar: Boolean = false,
-        afterSuccess: (suspend (ConnectionManager) -> Unit)? = null,
+        afterSuccess: suspend (ConnectionManager) -> Unit = {},
         block: suspend (ConnectionManager) -> String
     ) {
         val connection = connectionProvider() ?: return
@@ -46,18 +49,12 @@ class CommandRunner(
                 try {
                     val result = block(connection).ifBlank { "Command completed." }
                     _output.value = result
-                    if (notifySnackbar) {
-                        _snackbarEvents.tryEmit(summarizeForSnackbar(result))
-                    }
-                    afterSuccess?.invoke(connection)
+                    _snackbarEvents.tryEmit(summarizeForSnackbar(result))
+                    afterSuccess(connection)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    val errorMsg = "Error: ${e.message ?: "Operation failed"}"
-                    _output.value = errorMsg
-                    if (notifySnackbar) {
-                        _snackbarEvents.tryEmit(errorMsg)
-                    }
+                    report("Error: ${e.message ?: "Operation failed"}")
                 } finally {
                     _isExecuting.value = false
                 }

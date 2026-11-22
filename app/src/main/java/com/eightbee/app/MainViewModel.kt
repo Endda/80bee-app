@@ -75,36 +75,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val backgroundOperations: BackgroundOperationCoordinator =
         (application as EightBeeApplication).backgroundOperations
 
-    val deviceTweaksController: DeviceTweaksController = DeviceTweaksController(
+    val deviceTweaksController = DeviceTweaksController(
         application = application,
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
         backgroundOperations = backgroundOperations,
-        onOutput = commandRunner::show,
-        emitSnackbar = { commandRunner.report(it) },
-        runExclusive = { status, notify, refresh, block ->
-            commandRunner.run(
-                status,
-                notifySnackbar = notify,
-                afterSuccess = if (refresh) { conn -> deviceTweaksController.refreshSettingsInternal(conn) } else null,
-                block = block
-            )
-        }
+        runner = commandRunner
     )
 
     val debloaterController = DebloaterController(
         application = application,
-        runExclusive = { status, notify, block ->
-            commandRunner.run(status, notifySnackbar = notify, block = block)
-        }
+        runner = commandRunner
     )
 
     val batteryOptimizerController = BatteryOptimizerController(
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
-        runExclusive = { status, notify, block ->
-            commandRunner.run(status, notifySnackbar = notify, block = block)
-        }
+        runner = commandRunner
     )
 
     val bootloaderWizardController = BootloaderWizardController(

@@ -52,7 +52,7 @@ class CommandRunnerTest {
         lateinit var runner: CommandRunner
         val events = withRunner {
             runner = it
-            it.run("Working...", notifySnackbar = true) { "\n  First line  \nsecond" }
+            it.run("Working...") { "\n  First line  \nsecond" }
         }
         assertEquals("\n  First line  \nsecond", runner.output.value)
         assertEquals(listOf("First line"), events)
@@ -64,7 +64,7 @@ class CommandRunnerTest {
         lateinit var runner: CommandRunner
         val events = withRunner {
             runner = it
-            it.run("Working...", notifySnackbar = true) { "  " }
+            it.run("Working...") { "  " }
         }
         assertEquals("Command completed.", runner.output.value)
         assertEquals(listOf("Command completed."), events)
@@ -73,7 +73,7 @@ class CommandRunnerTest {
     @Test
     fun run_truncatesLongSnackbarLinesTo90Chars() {
         val longLine = "x".repeat(120)
-        val events = withRunner { it.run("Working...", notifySnackbar = true) { longLine } }
+        val events = withRunner { it.run("Working...") { longLine } }
         assertEquals(listOf("x".repeat(87) + "..."), events)
     }
 
@@ -82,23 +82,12 @@ class CommandRunnerTest {
         lateinit var runner: CommandRunner
         val events = withRunner {
             runner = it
-            it.run("Working...", notifySnackbar = true) { throw IllegalStateException("boom") }
-            it.run("Working...", notifySnackbar = true) { throw IllegalStateException() }
+            it.run("Working...") { throw IllegalStateException("boom") }
+            it.run("Working...") { throw IllegalStateException() }
         }
         assertEquals(listOf("Error: boom", "Error: Operation failed"), events)
         assertEquals("Error: Operation failed", runner.output.value)
         assertFalse(runner.isExecuting.value)
-    }
-
-    @Test
-    fun run_withoutSnackbarOnlyUpdatesOutput() {
-        lateinit var runner: CommandRunner
-        val events = withRunner {
-            runner = it
-            it.run("Working...") { "Done here" }
-        }
-        assertEquals("Done here", runner.output.value)
-        assertEquals(emptyList<String>(), events)
     }
 
     @Test
@@ -107,8 +96,8 @@ class CommandRunnerTest {
         val seenOutputs = mutableListOf<String>()
         val events = withRunner {
             runner = it
-            it.run("Working...", notifySnackbar = true, afterSuccess = { seenOutputs.add(runner.output.value) }) { "Applied." }
-            it.run("Working...", notifySnackbar = true, afterSuccess = { throw IllegalStateException("refresh failed") }) { "Applied again." }
+            it.run("Working...", afterSuccess = { seenOutputs.add(runner.output.value) }) { "Applied." }
+            it.run("Working...", afterSuccess = { throw IllegalStateException("refresh failed") }) { "Applied again." }
         }
         assertEquals(listOf("Applied."), seenOutputs)
         assertEquals(listOf("Applied.", "Applied again.", "Error: refresh failed"), events)
@@ -130,7 +119,7 @@ class CommandRunnerTest {
         var ran = false
         val events = withRunner(connection = null) {
             runner = it
-            it.run("Working...", notifySnackbar = true) { ran = true; "x" }
+            it.run("Working...") { ran = true; "x" }
         }
         assertFalse(ran)
         assertEquals("Ready.", runner.output.value)

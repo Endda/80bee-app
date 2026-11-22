@@ -6,6 +6,7 @@ import com.eightbee.app.connection.FastbootReply
 import com.eightbee.app.features.BATCH_FAILURE_MARKER
 import com.eightbee.app.features.BatteryOptimizerController
 import com.eightbee.app.features.BootloaderWizardController
+import com.eightbee.app.features.CommandRunner
 import com.eightbee.app.features.DebloaterController
 import com.eightbee.app.features.DeviceTweaksController
 import com.eightbee.app.features.FastbootCommandPolicy
@@ -14,6 +15,7 @@ import com.eightbee.app.features.SideloadController
 import com.eightbee.app.features.SnapshotFeedback
 import com.eightbee.app.features.parseKeyValueOutput
 import com.eightbee.app.features.parsePmListPackages
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -86,6 +88,10 @@ class FeatureControllersTest {
         override fun isAvailable(): Boolean = available
     }
 
+    /** A runner whose jobs execute eagerly on the caller's thread, so tests can assert right after a call. */
+    private fun eagerRunner(scope: CoroutineScope, conn: ConnectionManager) =
+        CommandRunner(scope, connectionProvider = { conn }, dispatcher = Dispatchers.Unconfined)
+
     @Test
     fun isValidPrivateDnsHost_acceptsHostnamesAndRejectsShellInjection() {
         assertTrue(DeviceTweaksController.isValidPrivateDnsHost("dns.adguard.com"))
@@ -113,9 +119,7 @@ class FeatureControllersTest {
         val controller = BatteryOptimizerController(
             scope = this,
             connectionProvider = { fakeConn },
-            runExclusive = { _, _, block ->
-                runBlocking { block(fakeConn) }
-            }
+            runner = eagerRunner(this, fakeConn)
         )
 
         controller.applyMaxHibernation()
@@ -134,24 +138,16 @@ class FeatureControllersTest {
     @Test
     fun batteryOptimizerController_doesNotCommitStateWhenBatchFails() = runBlocking {
         val fakeConn = FakeConnectionManager(shellResponder = { BATCH_FAILURE_MARKER })
-        val capturedErrors = mutableListOf<String>()
+        val runner = eagerRunner(this, fakeConn)
         val controller = BatteryOptimizerController(
             scope = this,
             connectionProvider = { fakeConn },
-            runExclusive = { _, _, block ->
-                runBlocking {
-                    try {
-                        block(fakeConn)
-                    } catch (e: Exception) {
-                        capturedErrors.add(e.message.orEmpty())
-                    }
-                }
-            }
+            runner = runner
         )
 
         controller.applyMaxHibernation()
         assertFalse(controller.state.value.maxHibernation)
-        assertEquals(1, capturedErrors.size)
+        assertTrue(runner.output.value.startsWith("Error: "))
     }
 
     @Test
@@ -238,7 +234,7 @@ class FeatureControllersTest {
             },
             openOutputStream = { null },
             readUriText = { "" },
-            runExclusive = { _, _, block -> runBlocking { block(fakeConn) } }
+            runner = eagerRunner(this, fakeConn)
         )
 
         controller.scanBloatware("recommended")
@@ -279,7 +275,7 @@ class FeatureControllersTest {
             loadSamsungDb = { emptyList() },
             openOutputStream = { null },
             readUriText = { "" },
-            runExclusive = { _, _, block -> runBlocking { block(fakeConn) } }
+            runner = eagerRunner(this, fakeConn)
         )
 
         controller.scanDegoogle(1)
@@ -383,7 +379,7 @@ class FeatureControllersTest {
             loadSamsungDb = { emptyList() },
             openOutputStream = { null },
             readUriText = { "" },
-            runExclusive = { _, _, block -> runBlocking { block(fakeConn) } },
+            runner = eagerRunner(this, fakeConn),
             encodeSnapshot = { packages -> packages.joinToString(",") },
             parseSnapshot = { raw ->
                 when (raw) {

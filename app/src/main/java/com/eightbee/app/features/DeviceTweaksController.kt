@@ -26,14 +26,7 @@ class DeviceTweaksController(
     private val scope: CoroutineScope,
     private val connectionProvider: () -> ConnectionManager?,
     private val backgroundOperations: BackgroundOperationCoordinator,
-    private val onOutput: (String) -> Unit,
-    private val emitSnackbar: (String) -> Unit,
-    private val runExclusive: (
-        initialStatus: String,
-        notifySnackbar: Boolean,
-        refreshSettings: Boolean,
-        block: suspend (ConnectionManager) -> String
-    ) -> Unit
+    private val runner: CommandRunner
 ) {
     private val _settings = MutableStateFlow(DeviceSettings())
     val settings: StateFlow<DeviceSettings> = _settings.asStateFlow()
@@ -59,7 +52,7 @@ class DeviceTweaksController(
         }
     }
 
-    suspend fun refreshSettingsInternal(connection: ConnectionManager) {
+    private suspend fun refreshSettingsInternal(connection: ConnectionManager) {
         if (!connection.isAvailable()) return
         if (connection.connectionState.value == ConnectionState.FastbootConnected) return
 
@@ -77,14 +70,14 @@ class DeviceTweaksController(
 
     // --- Private DNS ---
     fun setPrivateDnsOff() {
-        runExclusive("Disabling Private DNS...", true, true) { conn ->
+        runner.run("Disabling Private DNS...", afterSuccess = ::refreshSettingsInternal) { conn ->
             conn.runShellCommand("settings put global private_dns_mode off")
             "Private DNS turned off."
         }
     }
 
     fun setPrivateDnsAuto() {
-        runExclusive("Setting Private DNS to automatic...", true, true) { conn ->
+        runner.run("Setting Private DNS to automatic...", afterSuccess = ::refreshSettingsInternal) { conn ->
             conn.runShellCommand("settings put global private_dns_mode opportunistic")
             "Private DNS set to Automatic."
         }
@@ -93,12 +86,10 @@ class DeviceTweaksController(
     fun setPrivateDnsHostname(rawHost: String) {
         val host = rawHost.trim()
         if (!isValidPrivateDnsHost(host)) {
-            val msg = "Invalid Private DNS hostname."
-            onOutput(msg)
-            emitSnackbar(msg)
+            runner.report("Invalid Private DNS hostname.")
             return
         }
-        runExclusive("Applying Private DNS ($host)...", true, true) { conn ->
+        runner.run("Applying Private DNS ($host)...", afterSuccess = ::refreshSettingsInternal) { conn ->
             conn.runShellCommand("settings put global private_dns_mode hostname; settings put global private_dns_specifier '$host'")
             "Private DNS set to $host."
         }
@@ -108,7 +99,7 @@ class DeviceTweaksController(
     fun setAnimationScale(scale: Float) {
         if (scale !in listOf(0.0f, 0.5f, 1.0f)) return
         val label = "${scale}x"
-        runExclusive("Setting animation scales to $label...", true, true) { conn ->
+        runner.run("Setting animation scales to $label...", afterSuccess = ::refreshSettingsInternal) { conn ->
             conn.runShellCommand(
                 "settings put global window_animation_scale $scale; " +
                     "settings put global transition_animation_scale $scale; " +
@@ -120,19 +111,17 @@ class DeviceTweaksController(
 
     fun setDisplayDensity(dpi: Int) {
         if (dpi !in 120..800) {
-            val msg = "DPI must be between 120 and 800."
-            onOutput(msg)
-            emitSnackbar(msg)
+            runner.report("DPI must be between 120 and 800.")
             return
         }
-        runExclusive("Applying display density $dpi...", true, false) { conn ->
+        runner.run("Applying display density $dpi...") { conn ->
             conn.runShellCommand("wm density $dpi")
             "Display density set to $dpi."
         }
     }
 
     fun resetDisplayDensity() {
-        runExclusive("Resetting display density...", true, false) { conn ->
+        runner.run("Resetting display density...") { conn ->
             conn.runShellCommand("wm density reset")
             "Display density reset to stock."
         }
@@ -140,7 +129,7 @@ class DeviceTweaksController(
 
     // --- Boot Manager ---
     fun rebootDevice(mode: BootMode) {
-        runExclusive(mode.label, true, false) { conn ->
+        runner.run(mode.label) { conn ->
             val out = conn.runShellCommand(mode.shellCommand)
             out.ifBlank { "${mode.label} command sent." }
         }
@@ -150,7 +139,7 @@ class DeviceTweaksController(
     fun setForceDoze(enabled: Boolean) {
         val status = if (enabled) "Forcing Doze standby..." else "Unforcing Doze standby..."
         val cmd = if (enabled) "dumpsys deviceidle force-idle" else "dumpsys deviceidle unforce"
-        runExclusive(status, true, false) { conn ->
+        runner.run(status) { conn ->
             conn.runShellCommand(cmd).ifBlank {
                 if (enabled) "Forced Doze standby." else "Disabled forced Doze."
             }
@@ -160,28 +149,28 @@ class DeviceTweaksController(
     fun setAdaptiveBattery(enabled: Boolean) {
         val status = if (enabled) "Enabling Adaptive Battery..." else "Disabling Adaptive Battery..."
         val flag = if (enabled) "1" else "0"
-        runExclusive(status, true, true) { conn ->
+        runner.run(status, afterSuccess = ::refreshSettingsInternal) { conn ->
             conn.runShellCommand("settings put global adaptive_battery_management_enabled $flag")
             if (enabled) "Adaptive Battery enabled." else "Adaptive Battery disabled."
         }
     }
 
     fun simulateBatteryUnplug() {
-        runExclusive("Simulating battery unplug...", true, false) { conn ->
+        runner.run("Simulating battery unplug...") { conn ->
             conn.runShellCommand("dumpsys battery unplug").ifBlank { "Battery unplug simulation active." }
         }
     }
 
     fun resetBatterySimulation() {
-        runExclusive("Resetting battery state...", true, false) { conn ->
+        runner.run("Resetting battery state...") { conn ->
             conn.runShellCommand("dumpsys battery reset").ifBlank { "Battery state reset to hardware reporting." }
         }
     }
 
     // --- Bluetooth Repair ---
     fun executeBluetoothRepair(oemOverride: String, isAdvanced: Boolean) {
-        runExclusive("Starting Bluetooth Repair...", true, false) { conn ->
-            onOutput("Disabling Bluetooth...")
+        runner.run("Starting Bluetooth Repair...") { conn ->
+            runner.show("Disabling Bluetooth...")
             conn.runShellCommand("cmd bluetooth_manager disable || svc bluetooth disable")
             delay(2000)
 
@@ -202,10 +191,10 @@ class DeviceTweaksController(
 
             for (pkg in packages) {
                 if (isAdvanced) {
-                    onOutput("Clearing data for $pkg...")
+                    runner.show("Clearing data for $pkg...")
                     conn.runShellCommand("pm clear $pkg")
                 } else {
-                    onOutput("Restarting $pkg...")
+                    runner.show("Restarting $pkg...")
                     conn.runShellCommand("am force-stop $pkg")
                 }
             }
@@ -213,7 +202,7 @@ class DeviceTweaksController(
             if (isAdvanced) {
                 val sdkInt = conn.runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
                 if (sdkInt >= Build.VERSION_CODES.R) {
-                    onOutput("Cycling radios via Airplane Mode...")
+                    runner.show("Cycling radios via Airplane Mode...")
                     val originalApState = conn.runShellCommand("settings get global airplane_mode_on").trim().toIntOrNull() ?: 0
                     if (originalApState == 1) {
                         conn.runShellCommand("cmd connectivity airplane-mode disable")
@@ -227,15 +216,15 @@ class DeviceTweaksController(
                         delay(4000)
                     }
                 } else {
-                    onOutput("Skipping Airplane Mode radio cycle (cmd connectivity requires Android 11+; target SDK is $sdkInt).")
+                    runner.show("Skipping Airplane Mode radio cycle (cmd connectivity requires Android 11+; target SDK is $sdkInt).")
                 }
             }
 
-            onOutput("Enabling Bluetooth...")
+            runner.show("Enabling Bluetooth...")
             conn.runShellCommand("cmd bluetooth_manager enable || svc bluetooth enable")
             delay(3000)
 
-            onOutput("Checking Bluetooth state...")
+            runner.show("Checking Bluetooth state...")
             val dump = conn.runShellCommand("dumpsys bluetooth_manager")
             "Repair complete!\n\n$dump"
         }
@@ -248,7 +237,7 @@ class DeviceTweaksController(
             else -> return
         }
 
-        runExclusive("Applying ${oem.uppercase()} Bluetooth Doze & background exemptions...", true, false) { conn ->
+        runner.run("Applying ${oem.uppercase()} Bluetooth Doze & background exemptions...") { conn ->
             val exempted = mutableListOf<String>()
             for (pkg in targetPackages) {
                 val pathOutput = conn.runShellCommand("pm path $pkg")
@@ -268,7 +257,7 @@ class DeviceTweaksController(
 
     // --- Audio Mods ---
     fun executeAudioBypass() {
-        runExclusive("Applying Audio Safety Bypass...", true, false) { conn ->
+        runner.run("Applying Audio Safety Bypass...") { conn ->
             val targetApiLevel = conn.runShellCommand("getprop ro.build.version.sdk").trim().toIntOrNull() ?: 0
             if (targetApiLevel >= 34) {
                 conn.runShellCommand("settings put global audio_safe_csd_next_warning 999999.0")
@@ -280,7 +269,7 @@ class DeviceTweaksController(
     }
 
     fun restoreAudioDefaults() {
-        runExclusive("Restoring Audio Safety Defaults...", true, false) { conn ->
+        runner.run("Restoring Audio Safety Defaults...") { conn ->
             conn.runShellCommand("settings delete global audio_safe_csd_next_warning")
             conn.runShellCommand("settings put global safe_media_volume_enabled 1")
             conn.runShellCommand("settings put global audio_safe_volume_state 1")
@@ -307,7 +296,7 @@ class DeviceTweaksController(
 
     // --- Home Assistant Installer ---
     fun prepareHaSystem() {
-        runExclusive("Preparing system for Home Assistant...", true, false) { conn ->
+        runner.run("Preparing system for Home Assistant...") { conn ->
             conn.runShellBatch(
                 listOf(
                     "device_config set_sync_disabled_for_tests persistent",
@@ -324,14 +313,14 @@ class DeviceTweaksController(
     // /sdcard/Download/setup_ha.sh is pushed onto the remote ADB target, not read on the local host.
     @SuppressLint("SdCardPath")
     fun deployHomeAssistant() {
-        runExclusive("Checking Termux installation...", true, false) { conn ->
+        runner.run("Checking Termux installation...") { conn ->
             val termuxPath = conn.runShellCommand("pm path com.termux").trim()
             if (!termuxPath.startsWith("package:")) {
-                return@runExclusive "Error: Termux (com.termux) is not installed on the target device."
+                return@run "Error: Termux (com.termux) is not installed on the target device."
             }
 
             val isShizuku = conn.isLocal
-            onOutput("Generating installation script...")
+            runner.show("Generating installation script...")
             // Configure ~/.termux/termux.properties inside Termux itself because shell UID 2000
             // cannot write to /data/data/com.termux under Android's app sandbox.
             val setupScript = """
@@ -366,15 +355,15 @@ class DeviceTweaksController(
 
             val verifyOut = conn.runShellCommand("test -s /sdcard/Download/setup_ha.sh && echo OK").trim()
             if (verifyOut != "OK") {
-                return@runExclusive "Error: Failed to stage /sdcard/Download/setup_ha.sh on target device."
+                return@run "Error: Failed to stage /sdcard/Download/setup_ha.sh on target device."
             }
 
-            onOutput("Launching Termux and running installer...")
+            runner.show("Launching Termux and running installer...")
             conn.runShellCommand("am start -n com.termux/com.termux.app.TermuxActivity")
             delay(2000)
 
             if (isShizuku) {
-                onOutput("[Shizuku Guard] Keystroke injection may fail depending on OEM security settings. If it fails, open Termux and run: bash /sdcard/Download/setup_ha.sh")
+                runner.show("[Shizuku Guard] Keystroke injection may fail depending on OEM security settings. If it fails, open Termux and run: bash /sdcard/Download/setup_ha.sh")
             }
             conn.runShellCommand("input text bash")
             conn.runShellCommand("input keyevent 62")

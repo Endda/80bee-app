@@ -30,7 +30,7 @@ class DebloaterController internal constructor(
     private val loadSamsungDb: () -> List<PresetPkg>,
     private val openOutputStream: (Uri) -> OutputStream?,
     private val readUriText: (Uri) -> String,
-    private val runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit,
+    private val runner: CommandRunner,
     private val encodeSnapshot: (List<String>) -> String = { packages ->
         JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
@@ -41,14 +41,14 @@ class DebloaterController internal constructor(
 ) {
     constructor(
         application: Application,
-        runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit
+        runner: CommandRunner
     ) : this(
         loadUltimateDb = { PackageDatabase.loadUltimateDb(application) },
         loadDegoogleDb = { PackageDatabase.loadDegoogleDb(application) },
         loadSamsungDb = { PackageDatabase.loadSamsungDb(application) },
         openOutputStream = { uri -> application.contentResolver.openOutputStream(uri) },
         readUriText = { uri -> readUriTextBounded(application, uri) },
-        runExclusive = runExclusive
+        runner = runner
     )
 
     private val _debloatList = MutableStateFlow<List<BloatInfo>>(emptyList())
@@ -85,7 +85,7 @@ class DebloaterController internal constructor(
     }
 
     fun scanBloatware(safetyLevel: String) {
-        runExclusive("Scanning for bloatware...", true) { conn ->
+        runner.run("Scanning for bloatware...") { conn ->
             val manufacturer = conn.runShellCommand("getprop ro.product.manufacturer").trim()
             val brand = conn.runShellCommand("getprop ro.product.brand").trim()
             val installed = queryInstalledAndDisabled(conn)
@@ -127,7 +127,7 @@ class DebloaterController internal constructor(
         loadCatalog: () -> List<PresetPkg>,
         targetFlow: MutableStateFlow<List<PresetPkg>>
     ) {
-        runExclusive(initialStatus, true) { conn ->
+        runner.run(initialStatus) { conn ->
             val installed = queryInstalledAndDisabled(conn)
             val filtered = loadCatalog().filter { preset ->
                 installed.contains(preset.id) && preset.tier <= maxTier
@@ -138,7 +138,7 @@ class DebloaterController internal constructor(
     }
 
     fun disablePackages(packages: List<String>, isUninstall: Boolean) {
-        runExclusive("Processing package removal...", true) { conn ->
+        runner.run("Processing package removal...") { conn ->
             var success = 0
             var fail = 0
             var lastFailure: String? = null
@@ -183,7 +183,7 @@ class DebloaterController internal constructor(
     }
 
     fun restorePackages(packages: List<String>) {
-        runExclusive("Restoring packages...", true) { conn ->
+        runner.run("Restoring packages...") { conn ->
             var success = 0
             var fail = 0
             val restoredPackages = mutableSetOf<String>()
@@ -215,7 +215,7 @@ class DebloaterController internal constructor(
     }
 
     fun scanDisabledPackages() {
-        runExclusive("Scanning disabled packages...", true) { conn ->
+        runner.run("Scanning disabled packages...") { conn ->
             val disabled = runPmListPackages(conn, "pm list packages -d")
             _disabledPackages.value = disabled.toSet()
             _restoreList.value = disabled.map { PresetPkg(it, it, 1, "Currently disabled package.", "") }
@@ -227,7 +227,7 @@ class DebloaterController internal constructor(
     fun exportSnapshotToUri(uri: Uri) = exportSnapshot { openOutputStream(uri) }
 
     internal fun exportSnapshot(openStream: () -> OutputStream?) {
-        runExclusive("Exporting package snapshot...", true) { conn ->
+        runner.run("Exporting package snapshot...") { conn ->
             try {
                 val packages = runPmListPackages(conn, "pm list packages")
                 val payload = encodeSnapshot(packages)
@@ -252,7 +252,7 @@ class DebloaterController internal constructor(
     fun importSnapshotFromUri(uri: Uri) = importSnapshot { readUriText(uri) }
 
     internal fun importSnapshot(readText: () -> String) {
-        runExclusive("Comparing snapshot against device...", true) { conn ->
+        runner.run("Comparing snapshot against device...") { conn ->
             try {
                 val content = readText()
                 val parsed = parseSnapshot(content)
