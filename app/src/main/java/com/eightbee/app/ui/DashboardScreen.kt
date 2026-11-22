@@ -76,75 +76,17 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (activeConnection?.supportsFastboot == true) {
-            HomeLauncherCard(
-                title = stringResource(R.string.card_magisk_patcher_title),
-                description = stringResource(R.string.card_magisk_patcher_desc),
-                onClick = { viewModel.magiskPatcherController.startPatcher() }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        // Home Tab Cards (Launchers)
-        HomeLauncherCard(
-            title = stringResource(R.string.card_boot_manager_title),
-            description = stringResource(R.string.card_boot_manager_desc),
-            onClick = { viewModel.navigateTo(Screen.BootManager) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        HomeLauncherCard(
-            title = stringResource(R.string.card_ui_adjustments_title),
-            description = stringResource(R.string.card_ui_adjustments_desc),
-            onClick = { viewModel.navigateTo(Screen.UiAdjustments) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        HomeLauncherCard(
-            title = stringResource(R.string.card_dns_manager_title),
-            description = stringResource(R.string.card_dns_manager_desc),
-            onClick = { viewModel.navigateTo(Screen.DnsToggle) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        HomeLauncherCard(
-            title = stringResource(R.string.card_audio_mods_title),
-            description = stringResource(R.string.card_audio_mods_desc),
-            onClick = { viewModel.navigateTo(Screen.AudioMods) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        HomeLauncherCard(
-            title = stringResource(R.string.card_bluetooth_repair_title),
-            description = stringResource(R.string.card_bluetooth_repair_desc),
-            onClick = { viewModel.navigateTo(Screen.BluetoothRepair) }
-        )
+        LauncherList(homeLaunchers, activeConnection?.supportsFastboot == true, viewModel)
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HomeLauncherCard(
-    title: String,
-    description: String,
-    onClick: () -> Unit
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
+private val homeLaunchers = listOf(
+    ToolLauncher(R.string.card_magisk_patcher_title, R.string.card_magisk_patcher_desc, requiresFastboot = true) {
+        magiskPatcherController.startPatcher()
+    },
+    ToolLauncher(R.string.card_boot_manager_title, R.string.card_boot_manager_desc) { navigateTo(Screen.BootManager) },
+    ToolLauncher(R.string.card_ui_adjustments_title, R.string.card_ui_adjustments_desc) { navigateTo(Screen.UiAdjustments) },
+    ToolLauncher(R.string.card_dns_manager_title, R.string.card_dns_manager_desc) { navigateTo(Screen.DnsToggle) },
+    ToolLauncher(R.string.card_audio_mods_title, R.string.card_audio_mods_desc) { navigateTo(Screen.AudioMods) },
+    ToolLauncher(R.string.card_bluetooth_repair_title, R.string.card_bluetooth_repair_desc) { navigateTo(Screen.BluetoothRepair) }
+)
