@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 class BatteryOptimizerController(
     private val scope: CoroutineScope,
     private val connectionProvider: () -> ConnectionManager?,
-    private val runExclusive: (initialStatus: String, notifySnackbar: Boolean, block: suspend (ConnectionManager) -> String) -> Unit
+    private val runner: CommandRunner
 ) {
     private val _state = MutableStateFlow(BatteryOptimizerState())
     val state: StateFlow<BatteryOptimizerState> = _state.asStateFlow()
@@ -56,7 +56,7 @@ class BatteryOptimizerController(
         successMessage: String,
         commitState: (BatteryOptimizerState) -> BatteryOptimizerState
     ) {
-        runExclusive(status, true) { conn ->
+        runner.run(status) { conn ->
             conn.runShellBatch(commands)
             _state.update(commitState)
             successMessage
