@@ -223,7 +223,7 @@ class MagiskPatcherControllerTest {
         val recon = controller.state.value.reconPhase
         assertTrue(recon is ReconPhase.Failed)
         assertTrue((recon as ReconPhase.Failed).message.contains("unauthorized"))
-        assertTrue(controller.state.value.patchLogs.any { it.type == "ERROR" && it.message.contains("Recon failed") })
+        assertTrue(controller.state.value.patchLogs.any { it.level == LogLevel.ERROR && it.message.contains("Recon failed") })
     }
 
     @Test
@@ -386,7 +386,7 @@ class MagiskPatcherControllerTest {
 
     /** A controller with recon, boot image and Magisk APK loaded, recording every log line and connection call. */
     private class PatchHarness(val controller: MagiskPatcherController, val conn: FakePatcherConnection, val trace: MutableList<String>) {
-        fun logs(): List<String> = controller.state.value.patchLogs.map { "${it.type} ${it.message}" }
+        fun logs(): List<String> = controller.state.value.patchLogs.map { "${it.level} ${it.message}" }
     }
 
     private fun patchHarness(

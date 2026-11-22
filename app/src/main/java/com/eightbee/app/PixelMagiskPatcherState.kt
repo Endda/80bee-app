@@ -15,8 +15,10 @@ data class MagiskDeviceData(
     val targetPartition: String
 )
 
+enum class LogLevel { INFO, SUCCESS, ERROR, PROMPT, WARNING }
+
 data class LogEntry(
-    val type: String, // "INFO", "SUCCESS", "WAIT", "ERROR", "PROMPT", "WARNING"
+    val level: LogLevel,
     val message: String
 )
 
