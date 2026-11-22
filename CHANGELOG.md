@@ -2,6 +2,17 @@
 
 All notable changes to **80bee** are documented in this file.
 
+## [1.5.1] - 2026-11-22 (`versionCode 6`)
+
+### Fixes
+- Fixed cached files being overwritten when two were created in the same millisecond. A failed boot image load could delete the image that was already loaded in the Pixel Magisk Patcher, and two split APKs with the same file name in one archive could overwrite each other during sideload. Cache files now always get unique names.
+
+### UI
+- Audio Mods uses the same 8dp spacing between each description and its button as every other tool screen (was 12dp).
+
+### Internal
+- Refactored the patcher, sideload, debloater, bootloader wizard, battery optimizer, OTG connection and tool screens to remove duplicated code, with new characterization tests pinning their behavior (no other user-visible changes).
+
 ## [1.5] - 2026-11-19 (`versionCode 5`)
 
 ### Compatibility & Platform
