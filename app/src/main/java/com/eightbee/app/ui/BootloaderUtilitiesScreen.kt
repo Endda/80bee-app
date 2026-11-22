@@ -49,66 +49,32 @@ fun BootloaderUtilitiesScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            stringResource(R.string.bootloader_controls_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        ToolSectionHeader(stringResource(R.string.bootloader_controls_header))
         Spacer(modifier = Modifier.height(12.dp))
 
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                stringResource(R.string.bootloader_unlock_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+        ToolActionList(
+            listOf(
+                ToolAction(
+                    R.string.bootloader_unlock_title,
+                    R.string.bootloader_unlock_desc,
+                    R.string.bootloader_unlock_button,
+                    onClick = { wizardController.start(true) }
+                ),
+                ToolAction(
+                    R.string.bootloader_relock_title,
+                    R.string.bootloader_relock_desc,
+                    R.string.bootloader_lock_button,
+                    ActionEmphasis.Tonal,
+                    onClick = { wizardController.start(false) }
+                )
             )
-            Text(
-                stringResource(R.string.bootloader_unlock_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = { wizardController.start(true) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.bootloader_unlock_button))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                stringResource(R.string.bootloader_relock_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                stringResource(R.string.bootloader_relock_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            FilledTonalButton(
-                onClick = { wizardController.start(false) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.bootloader_lock_button))
-            }
-        }
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = stringResource(R.string.bootloader_tools_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        ToolSectionHeader(stringResource(R.string.bootloader_tools_header))
         Spacer(modifier = Modifier.height(8.dp))
 
         Surface(

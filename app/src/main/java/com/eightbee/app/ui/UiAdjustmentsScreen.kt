@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.R
 import com.eightbee.app.features.DeviceTweaksController
@@ -26,16 +25,10 @@ fun UiAdjustmentsScreen(controller: DeviceTweaksController, onBack: () -> Unit) 
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
+        ToolSectionHeader(
             stringResource(R.string.ui_adj_anim_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
             stringResource(R.string.ui_adj_anim_state_format, settings.windowAnimationScale.toString()),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.secondary
+            subtitleColor = MaterialTheme.colorScheme.secondary
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -68,16 +61,9 @@ fun UiAdjustmentsScreen(controller: DeviceTweaksController, onBack: () -> Unit) 
         HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
+        ToolSectionHeader(
             stringResource(R.string.ui_adj_dpi_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.ui_adj_dpi_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            stringResource(R.string.ui_adj_dpi_desc)
         )
         Spacer(modifier = Modifier.height(16.dp))
 

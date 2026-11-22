@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.R
 import com.eightbee.app.features.DeviceTweaksController
@@ -26,27 +25,21 @@ fun DnsToggleScreen(controller: DeviceTweaksController, onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
-            stringResource(R.string.dns_current_mode_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
         val currentModeLabel = when (settings.privateDnsMode) {
             "off" -> stringResource(R.string.dns_mode_off)
             "opportunistic" -> stringResource(R.string.dns_mode_auto)
             "hostname" -> stringResource(R.string.dns_mode_hostname_format, settings.privateDnsHostname)
             else -> stringResource(R.string.dns_mode_unknown)
         }
-        Text(currentModeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        ToolSectionHeader(
+            stringResource(R.string.dns_current_mode_header),
+            currentModeLabel,
+            subtitleColor = MaterialTheme.colorScheme.secondary
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            stringResource(R.string.dns_presets_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        ToolSectionHeader(stringResource(R.string.dns_presets_header))
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(
@@ -95,16 +88,9 @@ fun DnsToggleScreen(controller: DeviceTweaksController, onBack: () -> Unit) {
         HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
+        ToolSectionHeader(
             stringResource(R.string.dns_custom_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.dns_custom_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            stringResource(R.string.dns_custom_desc)
         )
         Spacer(modifier = Modifier.height(16.dp))
 
