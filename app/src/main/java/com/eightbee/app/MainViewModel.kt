@@ -23,15 +23,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-data class DeviceSettings(
-    val privateDnsMode: String = "unknown",
-    val privateDnsHostname: String = "",
-    val windowAnimationScale: String = "1.0",
-    val transitionAnimationScale: String = "1.0",
-    val animatorDurationScale: String = "1.0",
-    val adaptiveBatteryEnabled: Boolean = true
-)
-
 data class BatteryOptimizerState(
     val maxHibernation: Boolean = false,
     val dozeZero: Boolean = false,
@@ -43,13 +34,6 @@ data class BatteryOptimizerState(
     val samsungRamPlusOff: Boolean = false,
     val samsungMotionEngineOff: Boolean = false
 )
-
-enum class BootMode(val shellCommand: String, val label: String) {
-    SYSTEM("reboot", "Rebooting to system..."),
-    RECOVERY("reboot recovery", "Rebooting to recovery..."),
-    BOOTLOADER("reboot bootloader", "Rebooting to bootloader..."),
-    FASTBOOTD("reboot fastboot", "Rebooting to fastbootd...")
-}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -72,14 +56,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
     private val navStack = mutableListOf(Screen.Dashboard)
 
-    private val backgroundOperations: BackgroundOperationCoordinator =
+    val backgroundOperations: BackgroundOperationCoordinator =
         (application as EightBeeApplication).backgroundOperations
 
     val deviceTweaksController = DeviceTweaksController(
         application = application,
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
-        backgroundOperations = backgroundOperations,
         runner = commandRunner
     )
 

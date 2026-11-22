@@ -5,8 +5,8 @@ import com.eightbee.app.connection.ConnectionManager
 import com.eightbee.app.connection.ConnectionState
 import com.eightbee.app.connection.FastbootReply
 import com.eightbee.app.features.BATCH_FAILURE_MARKER
-import com.eightbee.app.features.BackgroundOperationCoordinator
 import com.eightbee.app.features.BatteryOptimizerController
+import com.eightbee.app.features.BluetoothOem
 import com.eightbee.app.features.BootloaderWizardController
 import com.eightbee.app.features.CommandRunner
 import com.eightbee.app.features.DebloaterController
@@ -649,7 +649,6 @@ class FeatureControllersTest {
             application = Application(),
             scope = this,
             connectionProvider = { conn },
-            backgroundOperations = BackgroundOperationCoordinator(elapsedRealtimeMs = { 0L }),
             runner = runner
         )
         val start = testScheduler.currentTime
@@ -662,17 +661,17 @@ class FeatureControllersTest {
     fun deviceTweaks_standardBluetoothRepairRestartsBaseAndOemPackages() = runTest {
         val base = listOf("com.android.bluetooth", "com.android.bluetoothmidiservice", "com.google.android.bluetooth")
         val oemExtras = mapOf(
-            "aosp" to emptyList(),
-            "samsung" to listOf("com.samsung.android.bluetooth"),
-            "xiaomi" to listOf("com.miui.bluetooth", "com.xiaomi.bluetooth", "com.xiaomi.bluetooth.overlay"),
-            "oneplus" to listOf("com.oplus.bluetooth", "com.coloros.bluetooth", "com.nearme.bluetooth"),
-            "motorola" to listOf("com.motorola.bluetooth", "com.motorola.bt")
+            BluetoothOem.AOSP to emptyList(),
+            BluetoothOem.SAMSUNG to listOf("com.samsung.android.bluetooth"),
+            BluetoothOem.XIAOMI to listOf("com.miui.bluetooth", "com.xiaomi.bluetooth", "com.xiaomi.bluetooth.overlay"),
+            BluetoothOem.ONEPLUS to listOf("com.oplus.bluetooth", "com.coloros.bluetooth", "com.nearme.bluetooth"),
+            BluetoothOem.MOTOROLA to listOf("com.motorola.bluetooth", "com.motorola.bt")
         )
         for ((oem, extras) in oemExtras) {
             val run = runTweak { executeBluetoothRepair(oem, isAdvanced = false) }
             val restarts = (base + extras).flatMap { listOf("> Restarting $it...", "am force-stop $it") }
             assertEquals(
-                oem,
+                oem.name,
                 listOf(
                     "> Starting Bluetooth Repair...",
                     "> Disabling Bluetooth...", "cmd bluetooth_manager disable || svc bluetooth disable"
@@ -707,7 +706,7 @@ class FeatureControllersTest {
             "> Repair complete!\n\nBT_DUMP"
         )
 
-        val airplaneOff = runTweak(sdk = 30, airplaneMode = "0") { executeBluetoothRepair("samsung", isAdvanced = true) }
+        val airplaneOff = runTweak(sdk = 30, airplaneMode = "0") { executeBluetoothRepair(BluetoothOem.SAMSUNG, isAdvanced = true) }
         assertEquals(
             prefix + listOf(
                 "> Cycling radios via Airplane Mode...", "settings get global airplane_mode_on",
@@ -717,7 +716,7 @@ class FeatureControllersTest {
         )
         assertEquals(13000L, airplaneOff.elapsedMs)
 
-        val airplaneOn = runTweak(sdk = 34, airplaneMode = "1") { executeBluetoothRepair("samsung", isAdvanced = true) }
+        val airplaneOn = runTweak(sdk = 34, airplaneMode = "1") { executeBluetoothRepair(BluetoothOem.SAMSUNG, isAdvanced = true) }
         assertEquals(
             prefix + listOf(
                 "> Cycling radios via Airplane Mode...", "settings get global airplane_mode_on",
@@ -726,7 +725,7 @@ class FeatureControllersTest {
             airplaneOn.transcript
         )
 
-        val oldSdk = runTweak(sdk = 29) { executeBluetoothRepair("samsung", isAdvanced = true) }
+        val oldSdk = runTweak(sdk = 29) { executeBluetoothRepair(BluetoothOem.SAMSUNG, isAdvanced = true) }
         assertEquals(
             prefix + listOf(
                 "> Skipping Airplane Mode radio cycle (cmd connectivity requires Android 11+; target SDK is 29)."
@@ -740,7 +739,7 @@ class FeatureControllersTest {
     @Test
     fun deviceTweaks_bluetoothQuirkExemptsInstalledPackagesOnlyForXiaomiAndOnePlus() = runTest {
         val xiaomi = runTweak(installed = setOf("com.android.bluetooth", "com.miui.bluetooth")) {
-            applyBluetoothQuirk("xiaomi")
+            applyBluetoothQuirk(BluetoothOem.XIAOMI)
         }
         assertEquals(
             listOf(
@@ -758,7 +757,7 @@ class FeatureControllersTest {
         )
         assertEquals("Exempted 2 Bluetooth package(s):\ncom.android.bluetooth\ncom.miui.bluetooth", xiaomi.output)
 
-        val oneplus = runTweak { applyBluetoothQuirk("oneplus") }
+        val oneplus = runTweak { applyBluetoothQuirk(BluetoothOem.ONEPLUS) }
         assertEquals(
             listOf(
                 "> Applying ONEPLUS Bluetooth Doze & background exemptions...",
@@ -772,10 +771,10 @@ class FeatureControllersTest {
         )
         assertEquals("No matching Bluetooth packages found for ONEPLUS.", oneplus.output)
 
-        for (oem in listOf("aosp", "samsung", "motorola")) {
+        for (oem in listOf(BluetoothOem.AOSP, BluetoothOem.SAMSUNG, BluetoothOem.MOTOROLA)) {
             val none = runTweak { applyBluetoothQuirk(oem) }
-            assertEquals(oem, emptyList<String>(), none.transcript)
-            assertEquals(oem, "Ready.", none.output)
+            assertEquals(oem.name, emptyList<String>(), none.transcript)
+            assertEquals(oem.name, "Ready.", none.output)
         }
     }
 

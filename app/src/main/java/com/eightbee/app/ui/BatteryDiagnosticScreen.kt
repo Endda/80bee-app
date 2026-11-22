@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.eightbee.app.R
+import com.eightbee.app.features.BackgroundOperationCoordinator
 import com.eightbee.app.features.DeviceTweaksController
 
 @Composable
@@ -42,9 +43,13 @@ internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -
 }
 
 @Composable
-fun BatteryDiagnosticScreen(controller: DeviceTweaksController, onBack: () -> Unit) {
-    val isMonitoring by controller.isMonitoringBattery.collectAsState()
-    val telemetryText by controller.batteryTelemetry.collectAsState()
+fun BatteryDiagnosticScreen(
+    controller: DeviceTweaksController,
+    backgroundOperations: BackgroundOperationCoordinator,
+    onBack: () -> Unit
+) {
+    val isMonitoring by backgroundOperations.isMonitoringBattery.collectAsState()
+    val telemetryText by backgroundOperations.batteryTelemetry.collectAsState()
     val startMonitoringWithPermission = rememberNotificationPermissionLauncher {
         controller.startBatteryMonitoring()
     }
