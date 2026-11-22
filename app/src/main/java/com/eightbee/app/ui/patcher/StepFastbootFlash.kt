@@ -21,6 +21,8 @@ import com.eightbee.app.FlashPhase
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
 import com.eightbee.app.features.MagiskPatcherController
+import com.eightbee.app.ui.AlertBanner
+import com.eightbee.app.ui.AlertTone
 import com.eightbee.app.ui.theme.ActionBlue
 import com.eightbee.app.ui.theme.SuccessGreen
 
@@ -46,25 +48,12 @@ internal fun StepFastbootFlash(controller: MagiskPatcherController, state: Pixel
         )
 
         if (state.showUnlockWarning) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = stringResource(R.string.patcher_unlock_alert_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = stringResource(R.string.patcher_unlock_alert_desc),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            }
+            AlertBanner(
+                title = stringResource(R.string.patcher_unlock_alert_title),
+                message = stringResource(R.string.patcher_unlock_alert_desc),
+                tone = AlertTone.Error,
+                prominent = true
+            )
         }
 
         OutlinedCard(

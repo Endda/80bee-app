@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.eightbee.app.connection.ConnectionManager
 import com.eightbee.app.connection.OtgConnectionManager
 import com.eightbee.app.connection.ShizukuConnectionManager
+import com.eightbee.app.features.BackgroundOperationCoordinator
 import com.eightbee.app.features.BatteryOptimizerController
 import com.eightbee.app.features.BootloaderWizardController
 import com.eightbee.app.features.DebloaterController
@@ -82,10 +83,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
     private val navStack = mutableListOf(Screen.Dashboard)
 
+    private val backgroundOperations: BackgroundOperationCoordinator =
+        (application as EightBeeApplication).backgroundOperations
+
     val deviceTweaksController = DeviceTweaksController(
         application = application,
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
+        backgroundOperations = backgroundOperations,
         onOutput = { _output.value = it },
         emitSnackbar = { _snackbarEvents.tryEmit(it) },
         runExclusive = { status, notify, refresh, block ->
@@ -140,9 +145,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         shizukuManager.close()
         otgManager.close()
-        val serviceConn = BackgroundOperationService.connectionManager
-        if (serviceConn === otgManager || serviceConn === _activeConnection.value) {
-            BackgroundOperationService.connectionManager = null
+        val activeCoordinatorConn = backgroundOperations.connectionManager
+        if (activeCoordinatorConn === otgManager || activeCoordinatorConn === _activeConnection.value) {
+            backgroundOperations.connectionManager = null
         }
     }
 
@@ -170,7 +175,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setActiveConnection(connection: ConnectionManager?) {
         _activeConnection.value = connection
-        BackgroundOperationService.connectionManager = connection
+        backgroundOperations.connectionManager = connection
         if (connection != null) {
             deviceTweaksController.refreshSettings()
         } else {
