@@ -10,7 +10,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.BackgroundOperationService
 import com.eightbee.app.BatteryOptimizerState
 import com.eightbee.app.R
 import com.eightbee.app.connection.ConnectionManager
@@ -104,8 +103,8 @@ fun BatteryOptimizerScreen(
         optimizerController.refreshState()
     }
 
-    val compileProgress by BackgroundOperationService.compileProgress.collectAsState()
-    val isCompiling by BackgroundOperationService.isCompiling.collectAsState()
+    val compileProgress by tweaksController.compileProgress.collectAsState()
+    val isCompiling by tweaksController.isCompiling.collectAsState()
     val startCompileWithPermission = rememberNotificationPermissionLauncher {
         tweaksController.startArtCompilation()
     }

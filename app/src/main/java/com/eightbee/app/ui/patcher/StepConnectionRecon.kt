@@ -21,6 +21,8 @@ import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
 import com.eightbee.app.ReconPhase
 import com.eightbee.app.features.MagiskPatcherController
+import com.eightbee.app.ui.AlertBanner
+import com.eightbee.app.ui.AlertTone
 import com.eightbee.app.ui.theme.StatusError
 import com.eightbee.app.ui.theme.SuccessGreen
 
@@ -79,10 +81,10 @@ internal fun StepConnectionRecon(controller: MagiskPatcherController, state: Pix
         val reconPhase = state.reconPhase
         if (reconPhase is ReconPhase.Failed) {
             val displayMsg = reconPhase.message.ifBlank { stringResource(R.string.patcher_recon_failed_default) }
-            PatcherAlertCard(
+            AlertBanner(
                 message = displayMsg,
                 iconContentDescription = stringResource(R.string.cd_error),
-                tone = PatcherAlertTone.Error
+                tone = AlertTone.Error
             )
         }
 
@@ -160,21 +162,21 @@ internal fun StepConnectionRecon(controller: MagiskPatcherController, state: Pix
             }
 
             if (device.isBeta) {
-                PatcherAlertCard(
+                AlertBanner(
                     message = stringResource(R.string.patcher_beta_warning),
                     iconContentDescription = stringResource(R.string.patcher_cd_beta_warning),
-                    tone = PatcherAlertTone.Info
+                    tone = AlertTone.Info
                 )
             }
 
             if (!device.isUnlocked) {
-                PatcherAlertCard(
+                AlertBanner(
                     message = stringResource(
                         if (!device.oemAllowed) R.string.patcher_unlock_warn_oem_disabled
                         else R.string.patcher_unlock_warn_oem_allowed
                     ),
                     iconContentDescription = stringResource(R.string.cd_warning),
-                    tone = PatcherAlertTone.Error
+                    tone = AlertTone.Error
                 )
             }
         }

@@ -31,6 +31,8 @@ import com.eightbee.app.FirmwarePhase
 import com.eightbee.app.PixelMagiskPatcherState
 import com.eightbee.app.R
 import com.eightbee.app.features.MagiskPatcherController
+import com.eightbee.app.ui.AlertBanner
+import com.eightbee.app.ui.AlertTone
 
 @Composable
 internal fun StepFirmwareHandoff(controller: MagiskPatcherController, state: PixelMagiskPatcherState) {
@@ -195,18 +197,18 @@ internal fun StepFirmwareHandoff(controller: MagiskPatcherController, state: Pix
         }
 
         if (firmwarePhase is FirmwarePhase.Failed) {
-            PatcherAlertCard(
+            AlertBanner(
                 message = firmwarePhase.message,
                 iconContentDescription = stringResource(R.string.cd_error),
-                tone = PatcherAlertTone.Error
+                tone = AlertTone.Error
             )
         }
 
         state.imageWarning?.let { warningMsg ->
-            PatcherAlertCard(
+            AlertBanner(
                 message = warningMsg,
                 iconContentDescription = stringResource(R.string.cd_warning),
-                tone = PatcherAlertTone.Info
+                tone = AlertTone.Info
             )
         }
     }

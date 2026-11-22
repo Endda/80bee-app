@@ -25,6 +25,7 @@ class DeviceTweaksController(
     private val application: Application,
     private val scope: CoroutineScope,
     private val connectionProvider: () -> ConnectionManager?,
+    private val backgroundOperations: BackgroundOperationCoordinator,
     private val onOutput: (String) -> Unit,
     private val emitSnackbar: (String) -> Unit,
     private val runExclusive: (
@@ -36,6 +37,10 @@ class DeviceTweaksController(
 ) {
     private val _settings = MutableStateFlow(DeviceSettings())
     val settings: StateFlow<DeviceSettings> = _settings.asStateFlow()
+    val compileProgress: StateFlow<String> get() = backgroundOperations.compileProgress
+    val isCompiling: StateFlow<Boolean> get() = backgroundOperations.isCompiling
+    val batteryTelemetry: StateFlow<String> get() = backgroundOperations.batteryTelemetry
+    val isMonitoringBattery: StateFlow<Boolean> get() = backgroundOperations.isMonitoringBattery
     private var refreshSettingsJob: Job? = null
 
     fun refreshSettings() {

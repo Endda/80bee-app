@@ -6,8 +6,6 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,7 +17,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.eightbee.app.BackgroundOperationService
 import com.eightbee.app.R
 import com.eightbee.app.features.DeviceTweaksController
 
@@ -46,8 +43,8 @@ internal fun rememberNotificationPermissionLauncher(onProceed: () -> Unit): () -
 
 @Composable
 fun BatteryDiagnosticScreen(controller: DeviceTweaksController, onBack: () -> Unit) {
-    val isMonitoring by BackgroundOperationService.isMonitoringBattery.collectAsState()
-    val telemetryText by BackgroundOperationService.batteryTelemetry.collectAsState()
+    val isMonitoring by controller.isMonitoringBattery.collectAsState()
+    val telemetryText by controller.batteryTelemetry.collectAsState()
     val startMonitoringWithPermission = rememberNotificationPermissionLauncher {
         controller.startBatteryMonitoring()
     }
@@ -107,36 +104,12 @@ fun BatteryDiagnosticScreen(controller: DeviceTweaksController, onBack: () -> Un
                 Spacer(modifier = Modifier.height(20.dp))
 
                 if (parsedData.isCharging) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Filled.Warning,
-                                contentDescription = stringResource(R.string.battery_diag_cd_charging_warning),
-                                tint = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = stringResource(R.string.battery_diag_charging_title),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                                Text(
-                                    text = stringResource(R.string.battery_diag_charging_desc),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                            }
-                        }
-                    }
+                    AlertBanner(
+                        title = stringResource(R.string.battery_diag_charging_title),
+                        message = stringResource(R.string.battery_diag_charging_desc),
+                        iconContentDescription = stringResource(R.string.battery_diag_cd_charging_warning),
+                        tone = AlertTone.Error
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
