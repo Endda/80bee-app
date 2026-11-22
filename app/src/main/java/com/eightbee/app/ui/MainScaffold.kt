@@ -20,23 +20,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
 import com.eightbee.app.R
 import com.eightbee.app.Screen
 
-sealed class NavItem(@param:StringRes val titleRes: Int, val icon: ImageVector) {
-    object Home : NavItem(R.string.nav_home, Icons.Filled.Home)
-    object Advanced : NavItem(R.string.nav_advanced, Icons.Filled.Build)
-    object About : NavItem(R.string.nav_about, Icons.Filled.Settings)
+enum class NavItem(@param:StringRes val titleRes: Int, val icon: ImageVector) {
+    Home(R.string.nav_home, Icons.Filled.Home),
+    Advanced(R.string.nav_advanced, Icons.Filled.Build),
+    About(R.string.nav_about, Icons.Filled.Settings)
 }
 
 @Composable
 fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
-    var selectedItem by rememberSaveable { mutableIntStateOf(0) }
-    val items = listOf(NavItem.Home, NavItem.Advanced, NavItem.About)
+    var selectedItem by rememberSaveable { mutableStateOf(NavItem.Home) }
     val currentScreen by viewModel.currentScreen.collectAsState()
+    val activeConnection by viewModel.activeConnection.collectAsState()
+    val onBack: () -> Unit = { viewModel.navigateBack() }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel) {
@@ -52,22 +52,20 @@ fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
     }
 
     // Handle physical back button presses in SPA model
-    BackHandler(enabled = currentScreen != Screen.Dashboard) {
-        viewModel.navigateBack()
-    }
+    BackHandler(enabled = currentScreen != Screen.Dashboard, onBack = onBack)
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
             if (currentScreen == Screen.Dashboard) {
                 NavigationBar {
-                    items.forEachIndexed { index, item ->
+                    NavItem.entries.forEach { item ->
                         val label = stringResource(item.titleRes)
                         NavigationBarItem(
                             icon = { Icon(item.icon, contentDescription = label) },
                             label = { Text(label) },
-                            selected = selectedItem == index,
-                            onClick = { selectedItem = index }
+                            selected = selectedItem == item,
+                            onClick = { selectedItem = item }
                         )
                     }
                 }
@@ -81,66 +79,61 @@ fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
         ) {
             if (currentScreen == Screen.Dashboard) {
                 when (selectedItem) {
-                    0 -> HomeTab(viewModel, onDisconnect)
-                    1 -> AdvancedTab(viewModel)
-                    2 -> AboutTab()
+                    NavItem.Home -> DashboardScreen(viewModel, onDisconnect)
+                    NavItem.Advanced -> AdvancedTab(viewModel)
+                    NavItem.About -> AboutTab()
                 }
             } else {
                 when (currentScreen) {
                     Screen.Debloater -> DebloaterScreen(
                         controller = viewModel.debloaterController,
-                        activeConnection = viewModel.activeConnection.collectAsState().value,
-                        onBack = { viewModel.navigateBack() }
+                        activeConnection = activeConnection,
+                        onBack = onBack
                     )
                     Screen.BatteryDiagnostic -> BatteryDiagnosticScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.BatteryOptimizer -> BatteryOptimizerScreen(
                         tweaksController = viewModel.deviceTweaksController,
                         optimizerController = viewModel.batteryOptimizerController,
-                        activeConnection = viewModel.activeConnection.collectAsState().value,
-                        onBack = { viewModel.navigateBack() }
+                        activeConnection = activeConnection,
+                        onBack = onBack
                     )
                     Screen.AudioMods -> AudioModsScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.BluetoothRepair -> BluetoothRepairScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.HaInstaller -> HaInstallerScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.BootManager -> BootManagerScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.UiAdjustments -> UiAdjustmentsScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.DnsToggle -> DnsToggleScreen(
                         controller = viewModel.deviceTweaksController,
-                        onBack = { viewModel.navigateBack() }
+                        onBack = onBack
                     )
                     Screen.BootloaderUtilities -> BootloaderUtilitiesScreen(
                         wizardController = viewModel.bootloaderWizardController,
-                        activeConnection = viewModel.activeConnection.collectAsState().value,
-                        onBack = { viewModel.navigateBack() }
+                        activeConnection = activeConnection,
+                        onBack = onBack
                     )
                     else -> {}
                 }
             }
         }
     }
-}
-
-@Composable
-fun HomeTab(viewModel: MainViewModel, onDisconnect: () -> Unit) {
-    DashboardScreen(viewModel, onDisconnect)
 }
 
 @Composable
@@ -157,48 +150,15 @@ fun AdvancedTab(viewModel: MainViewModel) {
         Text(stringResource(R.string.advanced_features_title), style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(16.dp))
 
-        AdvancedAppLauncherCard(
-            title = stringResource(R.string.card_app_management_title),
-            description = stringResource(R.string.card_app_management_desc),
+        AppLauncherCard(
             onOpenDebloater = { viewModel.navigateTo(Screen.Debloater) },
             onApkPicked = { uri ->
                 viewModel.sideloadController.startSideload(uri)
                 showSideloadSheet = true
             }
         )
-
         Spacer(modifier = Modifier.height(16.dp))
-
-        AdvancedLauncherCard(
-            title = stringResource(R.string.card_battery_optimizer_title),
-            description = stringResource(R.string.card_battery_optimizer_desc),
-            onClick = { viewModel.navigateTo(Screen.BatteryOptimizer) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        AdvancedLauncherCard(
-            title = stringResource(R.string.card_battery_diagnostics_title),
-            description = stringResource(R.string.card_battery_diagnostics_desc),
-            onClick = { viewModel.navigateTo(Screen.BatteryDiagnostic) }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        AdvancedLauncherCard(
-            title = stringResource(R.string.card_ha_installer_title),
-            description = stringResource(R.string.card_ha_installer_desc),
-            onClick = { viewModel.navigateTo(Screen.HaInstaller) }
-        )
-
-        if (connectionManager.supportsFastboot) {
-            Spacer(modifier = Modifier.height(16.dp))
-            AdvancedLauncherCard(
-                title = stringResource(R.string.card_bootloader_utilities_title),
-                description = stringResource(R.string.card_bootloader_utilities_desc),
-                onClick = { viewModel.navigateTo(Screen.BootloaderUtilities) }
-            )
-        }
+        LauncherList(advancedLaunchers, connectionManager.supportsFastboot, viewModel)
     }
 
     if (showSideloadSheet) {
@@ -209,36 +169,17 @@ fun AdvancedTab(viewModel: MainViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AdvancedLauncherCard(
-    title: String,
-    description: String,
-    onClick: () -> Unit
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+private val advancedLaunchers = listOf(
+    ToolLauncher(R.string.card_battery_optimizer_title, R.string.card_battery_optimizer_desc) { navigateTo(Screen.BatteryOptimizer) },
+    ToolLauncher(R.string.card_battery_diagnostics_title, R.string.card_battery_diagnostics_desc) { navigateTo(Screen.BatteryDiagnostic) },
+    ToolLauncher(R.string.card_ha_installer_title, R.string.card_ha_installer_desc) { navigateTo(Screen.HaInstaller) },
+    ToolLauncher(R.string.card_bootloader_utilities_title, R.string.card_bootloader_utilities_desc, requiresFastboot = true) {
+        navigateTo(Screen.BootloaderUtilities)
     }
-}
+)
 
 @Composable
-fun AdvancedAppLauncherCard(
-    title: String,
-    description: String,
-    onOpenDebloater: () -> Unit,
-    onApkPicked: (Uri) -> Unit
-) {
+private fun AppLauncherCard(onOpenDebloater: () -> Unit, onApkPicked: (Uri) -> Unit) {
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -246,14 +187,10 @@ fun AdvancedAppLauncherCard(
     }
 
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        LauncherCardContent(
+            title = stringResource(R.string.card_app_management_title),
+            description = stringResource(R.string.card_app_management_desc)
+        ) {
             Spacer(modifier = Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onOpenDebloater, modifier = Modifier.weight(1f)) {
