@@ -23,8 +23,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.LogEntry
+import com.eightbee.app.LogLevel
 import com.eightbee.app.ui.theme.StatusError
-import com.eightbee.app.ui.theme.StatusInfo
 import com.eightbee.app.ui.theme.StatusWarning
 import com.eightbee.app.ui.theme.SuccessGreen
 import com.eightbee.app.ui.theme.TerminalBackground
@@ -170,13 +170,12 @@ internal fun TerminalLogView(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(logs) { log ->
-                val color = when (log.type) {
-                    "ERROR" -> StatusError
-                    "SUCCESS" -> SuccessGreen
-                    "WARNING" -> StatusWarning
-                    "PROMPT" -> TerminalTextPrompt
-                    "WAIT" -> StatusInfo
-                    else -> TerminalTextDefault
+                val color = when (log.level) {
+                    LogLevel.ERROR -> StatusError
+                    LogLevel.SUCCESS -> SuccessGreen
+                    LogLevel.WARNING -> StatusWarning
+                    LogLevel.PROMPT -> TerminalTextPrompt
+                    LogLevel.INFO -> TerminalTextDefault
                 }
 
                 Row(
@@ -193,7 +192,7 @@ internal fun TerminalLogView(
                         )
                     )
                     Text(
-                        text = "[${log.type}] ${log.message}",
+                        text = "[${log.level}] ${log.message}",
                         style = MaterialTheme.typography.bodySmall.copy(
                             color = color,
                             fontFamily = FontFamily.Monospace

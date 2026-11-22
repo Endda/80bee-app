@@ -7,6 +7,7 @@ import com.eightbee.app.BootExtractionResult
 import com.eightbee.app.FirmwarePhase
 import com.eightbee.app.FlashPhase
 import com.eightbee.app.LogEntry
+import com.eightbee.app.LogLevel
 import com.eightbee.app.MagiskDeviceData
 import com.eightbee.app.MagiskExtractPhase
 import com.eightbee.app.MagiskPatcherHelper
@@ -140,7 +141,7 @@ class MagiskPatcherController internal constructor(
             _state.update { it.copy(currentStep = step) }
             if (step == 4 && currentState.patchedFile == null && currentState.patchPhase !is PatchPhase.Succeeded) {
                 _state.update { it.copy(patchLogs = emptyList()) }
-                addPatchLog("Awaiting execution trigger...", "INFO")
+                addPatchLog("Awaiting execution trigger...")
             }
         }
     }
@@ -182,7 +183,7 @@ class MagiskPatcherController internal constructor(
                         reconPhase = ReconPhase.Failed(e.message ?: "Hardware recon failed.")
                     )
                 }
-                addPatchLog("Recon failed: ${e.message}", "ERROR")
+                addPatchLog("Recon failed: ${e.message}", LogLevel.ERROR)
             }
         }
     }
@@ -279,7 +280,7 @@ class MagiskPatcherController internal constructor(
                         imageWarning = null
                     )
                 }
-                addPatchLog("Load boot file failed: ${e.message}", "ERROR")
+                addPatchLog("Load boot file failed: ${e.message}", LogLevel.ERROR)
             }
         }
     }
@@ -361,26 +362,22 @@ class MagiskPatcherController internal constructor(
                 patchLogs = emptyList()
             )
         }
-        addPatchLog("Initializing scoped workspace...", "INFO")
+        addPatchLog("Initializing scoped workspace...")
 
         launchJob(JobSlot.PATCH) {
             val workspace = "/data/local/tmp/80bee_patcher"
             try {
                 connection.runShellCommand("rm -rf $workspace && mkdir -p $workspace")
 
-                addPatchLog("Pushing boot image...", "INFO")
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.1f, "Uploading boot image...")) }
+                patchStep(0.1f, "Uploading boot image...", log = "Pushing boot image...")
                 val remoteBootPath = "$workspace/boot.img"
                 FileInputStream(bootFile).use { fis ->
                     connection.pushFile(fis, bootFile.length(), remoteBootPath) { sent, total ->
-                        val progress = 0.1f + (sent.toFloat() / total) * 0.4f
-                        val label = "Uploading boot image (${formatMegabytes(sent)})..."
-                        _state.update { it.copy(patchPhase = PatchPhase.InProgress(progress, label)) }
+                        patchStep(0.1f + (sent.toFloat() / total) * 0.4f, "Uploading boot image (${formatMegabytes(sent)})...")
                     }
                 }
 
-                addPatchLog("Pushing Magisk components...", "INFO")
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.5f, "Pushing Magisk binaries...")) }
+                patchStep(0.5f, "Pushing Magisk binaries...", log = "Pushing Magisk components...")
 
                 val extractedFiles = cachedComponents
                     .takeIf { it.isNotEmpty() && it.values.all(File::exists) }
@@ -393,30 +390,26 @@ class MagiskPatcherController internal constructor(
                         connection.pushFile(fis, file.length(), "$workspace/$name")
                     }
                     compIdx++
-                    val progress = 0.5f + (compIdx.toFloat() / totalComp) * 0.15f
-                    _state.update { it.copy(patchPhase = PatchPhase.InProgress(progress, "Pushed $name")) }
+                    patchStep(0.5f + (compIdx.toFloat() / totalComp) * 0.15f, "Pushed $name")
                 }
 
-                addPatchLog("Executing boot_patch.sh...", "INFO")
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.7f, "Setting permissions...")) }
+                patchStep(0.7f, "Setting permissions...", log = "Executing boot_patch.sh...")
                 connection.runShellCommand("chmod +x $workspace/*")
 
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.75f, "Patching kernel image...")) }
+                patchStep(0.75f, "Patching kernel image...")
                 val patchCmd = "cd $workspace && export KEEPVERITY=true; export KEEPFORCEENCRYPT=true; export PATCHVBMETAFLAG=false; sh boot_patch.sh $remoteBootPath"
 
                 connection.runShellCommandLive(patchCmd) { line ->
-                    addPatchLog(line, "PROMPT")
+                    addPatchLog(line, LogLevel.PROMPT)
                 }
 
-                addPatchLog("Locating patched image...", "INFO")
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.8f, "Locating patched image...")) }
+                patchStep(0.8f, "Locating patched image...", log = "Locating patched image...")
                 val checkOut = connection.runShellCommand("ls $workspace/new-boot.img").trim()
                 if (checkOut.contains("No such file") || checkOut.isEmpty()) {
                     throw Exception("Patched image not found! Script output was logged above.")
                 }
 
-                addPatchLog("Pulling patched image to host...", "INFO")
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.85f, "Pulling patched image...")) }
+                patchStep(0.85f, "Pulling patched image...", log = "Pulling patched image to host...")
                 val remotePatchedPath = "$workspace/new-boot.img"
                 val patchedFile = File(cacheDirProvider(), "patched_boot_${System.currentTimeMillis()}.img")
                 try {
@@ -425,8 +418,7 @@ class MagiskPatcherController internal constructor(
                         destination = patchedFile,
                         maxBytes = MAX_BOOT_IMAGE_BYTES
                     ) { received ->
-                        val label = "Pulling patched image (${formatMegabytes(received)})..."
-                        _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.85f, label)) }
+                        patchStep(0.85f, "Pulling patched image (${formatMegabytes(received)})...")
                     }
                     MagiskPatcherHelper.validateBootImageForPartition(
                         patchedFile,
@@ -439,11 +431,10 @@ class MagiskPatcherController internal constructor(
 
                 deleteIfReplaced(_state.value.patchedFile, patchedFile)
 
-                addPatchLog("Cleaning staging area...", "INFO")
-                _state.update { it.copy(patchPhase = PatchPhase.InProgress(0.95f, "Cleaning up...")) }
+                patchStep(0.95f, "Cleaning up...", log = "Cleaning staging area...")
                 connection.runShellCommand("rm -rf $workspace")
 
-                addPatchLog("Successfully patched and retrieved!", "SUCCESS")
+                addPatchLog("Successfully patched and retrieved!", LogLevel.SUCCESS)
                 _state.update {
                     it.copy(
                         patchPhase = PatchPhase.Succeeded,
@@ -454,7 +445,7 @@ class MagiskPatcherController internal constructor(
                 throw e
             } catch (e: Exception) {
                 val msg = e.message ?: "Patching failed"
-                addPatchLog("Error: $msg", "ERROR")
+                addPatchLog("Error: $msg", LogLevel.ERROR)
                 _state.update {
                     it.copy(patchPhase = PatchPhase.Failed(msg))
                 }
@@ -471,7 +462,7 @@ class MagiskPatcherController internal constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                addPatchLog("Reboot command note: ${e.message}", "WARNING")
+                addPatchLog("Reboot command note: ${e.message}", LogLevel.WARNING)
             }
             _state.update { it.copy(flashPhase = FlashPhase.RebootSent) }
         }
@@ -487,47 +478,45 @@ class MagiskPatcherController internal constructor(
         val targetPartition = deviceData.targetPartition
 
         _state.update { it.copy(flashPhase = FlashPhase.Flashing) }
-        addPatchLog("Writing patched image to $targetPartition...", "INFO")
+        addPatchLog("Writing patched image to $targetPartition...")
 
         val slot = deviceData.currentSlot
-        val candidatePartitions = listOfNotNull(
-            targetPartition,
-            "$targetPartition$slot".takeIf { slot.isNotEmpty() && !targetPartition.endsWith(slot) }
+        val attempts = listOfNotNull(
+            FlashAttempt(targetPartition, intro = null, failure = "Flash to $targetPartition failed", fallbackError = "Flash failed"),
+            "$targetPartition$slot".takeIf { slot.isNotEmpty() && !targetPartition.endsWith(slot) }?.let { slotted ->
+                FlashAttempt(
+                    slotted,
+                    intro = "Retrying flash with slot suffix ($slotted)...",
+                    failure = "Slotted flash ($slotted) failed",
+                    fallbackError = "Slotted flash failed"
+                )
+            }
         )
 
         launchJob(JobSlot.FLASH) {
-            var flashSuccess = false
             var lastErrorMsg = ""
-
-            for ((index, partition) in candidatePartitions.withIndex()) {
-                if (index > 0) {
-                    addPatchLog("Retrying flash with slot suffix ($partition)...", "INFO")
-                }
+            val flashSuccess = attempts.any { attempt ->
+                attempt.intro?.let { addPatchLog(it) }
                 try {
                     FileInputStream(patchedFile).use { fis ->
-                        connection.flashFastbootImage(partition, fis, patchedFile.length())
+                        connection.flashFastbootImage(attempt.partition, fis, patchedFile.length())
                     }
-                    flashSuccess = true
-                    break
+                    true
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    if (index == 0) {
-                        lastErrorMsg = e.message ?: "Flash failed"
-                        addPatchLog("Flash to $partition failed: $lastErrorMsg", "WARNING")
-                    } else {
-                        lastErrorMsg = e.message ?: "Slotted flash failed"
-                        addPatchLog("Slotted flash ($partition) failed: $lastErrorMsg", "WARNING")
-                    }
+                    lastErrorMsg = e.message ?: attempt.fallbackError
+                    addPatchLog("${attempt.failure}: $lastErrorMsg", LogLevel.WARNING)
+                    false
                 }
             }
 
             if (flashSuccess) {
-                addPatchLog("Flash complete!", "SUCCESS")
+                addPatchLog("Flash complete!", LogLevel.SUCCESS)
                 _state.update { it.copy(flashPhase = FlashPhase.Succeeded) }
             } else {
-                addPatchLog("Flash fatal error: $lastErrorMsg", "ERROR")
-                addPatchLog("Tip: Ensure device is in Bootloader/Fastboot mode and not userspace fastbootd.", "WARNING")
+                addPatchLog("Flash fatal error: $lastErrorMsg", LogLevel.ERROR)
+                addPatchLog("Tip: Ensure device is in Bootloader/Fastboot mode and not userspace fastbootd.", LogLevel.WARNING)
                 _state.update { it.copy(flashPhase = FlashPhase.Failed(lastErrorMsg)) }
             }
         }
@@ -546,15 +535,15 @@ class MagiskPatcherController internal constructor(
                 val res = connection.runShellCommand("pm install -r /data/local/tmp/magisk.apk")
                 if (res.contains("Success", ignoreCase = true)) {
                     _state.update { it.copy(finalApkInstalled = true) }
-                    addPatchLog("Magisk Manager APK successfully installed on device!", "SUCCESS")
+                    addPatchLog("Magisk Manager APK successfully installed on device!", LogLevel.SUCCESS)
                 } else {
-                    addPatchLog("Failed to install APK: $res", "ERROR")
+                    addPatchLog("Failed to install APK: $res", LogLevel.ERROR)
                 }
                 connection.runShellCommand("rm -f /data/local/tmp/magisk.apk")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                addPatchLog("Failed to install APK: ${e.message}", "ERROR")
+                addPatchLog("Failed to install APK: ${e.message}", LogLevel.ERROR)
             }
         }
     }
@@ -646,19 +635,28 @@ class MagiskPatcherController internal constructor(
 
     private fun addExtractLog(msg: String) {
         logSink(false, TAG, "[EXTRACT] $msg")
-        val entry = LogEntry("INFO", msg)
+        val entry = LogEntry(LogLevel.INFO, msg)
         _state.update { it.copy(extractLogs = it.extractLogs + entry) }
     }
 
-    private fun addPatchLog(msg: String, type: String = "INFO") {
-        if (type == "ERROR") {
+    private fun addPatchLog(msg: String, level: LogLevel = LogLevel.INFO) {
+        if (level == LogLevel.ERROR) {
             logSink(true, TAG, "[PATCH] $msg")
         } else {
-            logSink(false, TAG, "[PATCH] [$type] $msg")
+            logSink(false, TAG, "[PATCH] [$level] $msg")
         }
-        val entry = LogEntry(type, msg)
+        val entry = LogEntry(level, msg)
         _state.update { it.copy(patchLogs = it.patchLogs + entry) }
     }
+
+    /** Logs [log] if given, then shows [label] at [progress] on the patch progress bar. */
+    private fun patchStep(progress: Float, label: String, log: String? = null) {
+        log?.let { addPatchLog(it) }
+        _state.update { it.copy(patchPhase = PatchPhase.InProgress(progress, label)) }
+    }
+
+    /** One fastboot write target, with the log wording for trying it and for its failure. */
+    private class FlashAttempt(val partition: String, val intro: String?, val failure: String, val fallbackError: String)
 
     private companion object {
         const val TAG = "MagiskPatcherController"
