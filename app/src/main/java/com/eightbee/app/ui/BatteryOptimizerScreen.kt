@@ -9,83 +9,67 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.eightbee.app.BatteryOptimizerState
 import com.eightbee.app.R
 import com.eightbee.app.connection.ConnectionManager
 import com.eightbee.app.features.BackgroundOperationCoordinator
 import com.eightbee.app.features.BatteryOptimizerController
 import com.eightbee.app.features.DeviceTweaksController
+import com.eightbee.app.features.OptimizerTweak
 
 private data class OptimizerToggleSpec(
+    val tweak: OptimizerTweak,
     @param:StringRes @get:StringRes val titleRes: Int,
-    @param:StringRes @get:StringRes val descriptionRes: Int,
-    val isChecked: (BatteryOptimizerState) -> Boolean,
-    val onToggle: (BatteryOptimizerController, Boolean) -> Unit
+    @param:StringRes @get:StringRes val descriptionRes: Int
 )
 
 private val DEEP_SYSTEM_TOGGLES = listOf(
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_max_hibernation_title,
-        descriptionRes = R.string.battery_opt_max_hibernation_desc,
-        isChecked = { it.maxHibernation },
-        onToggle = { controller, enabled ->
-            if (enabled) controller.applyMaxHibernation() else controller.restoreMaxHibernation()
-        }
+        OptimizerTweak.MAX_HIBERNATION,
+        R.string.battery_opt_max_hibernation_title,
+        R.string.battery_opt_max_hibernation_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_zero_maint_title,
-        descriptionRes = R.string.battery_opt_zero_maint_desc,
-        isChecked = { it.dozeZero },
-        onToggle = { controller, enabled ->
-            if (enabled) controller.applyDozeZero() else controller.restoreDozeZero()
-        }
+        OptimizerTweak.DOZE_ZERO,
+        R.string.battery_opt_zero_maint_title,
+        R.string.battery_opt_zero_maint_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_drain_monitor_title,
-        descriptionRes = R.string.battery_opt_drain_monitor_desc,
-        isChecked = { it.backgroundDrainMonitor },
-        onToggle = { controller, enabled -> controller.setBackgroundDrainMonitor(enabled) }
+        OptimizerTweak.BACKGROUND_DRAIN_MONITOR,
+        R.string.battery_opt_drain_monitor_title,
+        R.string.battery_opt_drain_monitor_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_lock_60hz_title,
-        descriptionRes = R.string.battery_opt_lock_60hz_desc,
-        isChecked = { it.lockRefreshRate60 },
-        onToggle = { controller, enabled -> controller.setLockRefreshRate60(enabled) }
+        OptimizerTweak.LOCK_REFRESH_RATE_60,
+        R.string.battery_opt_lock_60hz_title,
+        R.string.battery_opt_lock_60hz_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_disable_blurs_title,
-        descriptionRes = R.string.battery_opt_disable_blurs_desc,
-        isChecked = { it.disableWindowBlurs },
-        onToggle = { controller, enabled -> controller.setDisableWindowBlurs(enabled) }
+        OptimizerTweak.DISABLE_WINDOW_BLURS,
+        R.string.battery_opt_disable_blurs_title,
+        R.string.battery_opt_disable_blurs_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_super_dim_title,
-        descriptionRes = R.string.battery_opt_super_dim_desc,
-        isChecked = { it.superDim },
-        onToggle = { controller, enabled ->
-            if (enabled) controller.applySuperDim() else controller.restoreSuperDim()
-        }
+        OptimizerTweak.SUPER_DIM,
+        R.string.battery_opt_super_dim_title,
+        R.string.battery_opt_super_dim_desc
     )
 )
 
 private val SAMSUNG_OEM_TOGGLES = listOf(
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_cpu_booster_title,
-        descriptionRes = R.string.battery_opt_cpu_booster_desc,
-        isChecked = { it.samsungCpuBoosterOff },
-        onToggle = { controller, disabled -> controller.setSamsungCpuResponsiveness(!disabled) }
+        OptimizerTweak.SAMSUNG_CPU_BOOSTER_OFF,
+        R.string.battery_opt_cpu_booster_title,
+        R.string.battery_opt_cpu_booster_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_ram_plus_title,
-        descriptionRes = R.string.battery_opt_ram_plus_desc,
-        isChecked = { it.samsungRamPlusOff },
-        onToggle = { controller, disabled -> controller.setSamsungRamPlusOff(disabled) }
+        OptimizerTweak.SAMSUNG_RAM_PLUS_OFF,
+        R.string.battery_opt_ram_plus_title,
+        R.string.battery_opt_ram_plus_desc
     ),
     OptimizerToggleSpec(
-        titleRes = R.string.battery_opt_motion_engine_title,
-        descriptionRes = R.string.battery_opt_motion_engine_desc,
-        isChecked = { it.samsungMotionEngineOff },
-        onToggle = { controller, disabled -> controller.setSamsungMotionEngineOff(disabled) }
+        OptimizerTweak.SAMSUNG_MOTION_ENGINE_OFF,
+        R.string.battery_opt_motion_engine_title,
+        R.string.battery_opt_motion_engine_desc
     )
 )
 
@@ -226,7 +210,7 @@ fun BatteryOptimizerScreen(
 @Composable
 private fun OptimizerToggleGroup(
     toggles: List<OptimizerToggleSpec>,
-    state: BatteryOptimizerState,
+    state: Set<OptimizerTweak>,
     controller: BatteryOptimizerController
 ) {
     toggles.forEachIndexed { index, spec ->
@@ -236,8 +220,8 @@ private fun OptimizerToggleGroup(
         OptimizerToggleRow(
             titleRes = spec.titleRes,
             descriptionRes = spec.descriptionRes,
-            checked = spec.isChecked(state),
-            onCheckedChange = { spec.onToggle(controller, it) }
+            checked = spec.tweak in state,
+            onCheckedChange = { controller.setTweak(spec.tweak, it) }
         )
     }
 }

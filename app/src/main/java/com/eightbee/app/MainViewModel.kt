@@ -23,18 +23,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-data class BatteryOptimizerState(
-    val maxHibernation: Boolean = false,
-    val dozeZero: Boolean = false,
-    val backgroundDrainMonitor: Boolean = false,
-    val lockRefreshRate60: Boolean = false,
-    val disableWindowBlurs: Boolean = false,
-    val superDim: Boolean = false,
-    val samsungCpuBoosterOff: Boolean = false,
-    val samsungRamPlusOff: Boolean = false,
-    val samsungMotionEngineOff: Boolean = false
-)
-
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val shizukuManager = ShizukuConnectionManager()

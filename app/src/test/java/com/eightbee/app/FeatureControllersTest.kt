@@ -13,6 +13,7 @@ import com.eightbee.app.features.DebloaterController
 import com.eightbee.app.features.DeviceTweaksController
 import com.eightbee.app.features.FastbootCommandPolicy
 import com.eightbee.app.features.FastbootValidationResult
+import com.eightbee.app.features.OptimizerTweak
 import com.eightbee.app.features.SideloadController
 import com.eightbee.app.features.SnapshotFeedback
 import com.eightbee.app.features.parseKeyValueOutput
@@ -133,16 +134,16 @@ class FeatureControllersTest {
             runner = eagerRunner(this, fakeConn)
         )
 
-        controller.applyMaxHibernation()
-        controller.applyDozeZero()
+        controller.setTweak(OptimizerTweak.MAX_HIBERNATION, true)
+        controller.setTweak(OptimizerTweak.DOZE_ZERO, true)
         fakeConn.executedShellCommands.clear()
 
         // Restoring only maxHibernation must keep min_time_to_alarm because dozeZero is still active.
-        controller.restoreMaxHibernation()
+        controller.setTweak(OptimizerTweak.MAX_HIBERNATION, false)
         assertFalse(fakeConn.executedShellCommands.any { it.contains("min_time_to_alarm") })
 
         // Restoring the second toggle should now clean up min_time_to_alarm.
-        controller.restoreDozeZero()
+        controller.setTweak(OptimizerTweak.DOZE_ZERO, false)
         assertTrue(fakeConn.executedShellCommands.any { it.contains("device_config delete device_idle min_time_to_alarm") })
     }
 
@@ -156,8 +157,8 @@ class FeatureControllersTest {
             runner = runner
         )
 
-        controller.applyMaxHibernation()
-        assertFalse(controller.state.value.maxHibernation)
+        controller.setTweak(OptimizerTweak.MAX_HIBERNATION, true)
+        assertFalse(OptimizerTweak.MAX_HIBERNATION in controller.state.value)
         assertTrue(runner.output.value.startsWith("Error: "))
     }
 
@@ -165,7 +166,7 @@ class FeatureControllersTest {
     private class OptimizerToggleCase(
         val name: String,
         val toggle: (BatteryOptimizerController, Boolean) -> Unit,
-        val isOn: (BatteryOptimizerState) -> Boolean,
+        val isOn: (Set<OptimizerTweak>) -> Boolean,
         val on: List<String>,
         val off: List<String>
     )
@@ -192,8 +193,8 @@ class FeatureControllersTest {
     private val optimizerCases = listOf(
         OptimizerToggleCase(
             "maxHibernation",
-            { c, on -> if (on) c.applyMaxHibernation() else c.restoreMaxHibernation() },
-            { it.maxHibernation },
+            { c, on -> c.setTweak(OptimizerTweak.MAX_HIBERNATION, on) },
+            { OptimizerTweak.MAX_HIBERNATION in it },
             on = job(
                 "Applying Maximum Hibernation Doze Mode...",
                 batch(
@@ -210,8 +211,8 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "dozeZero",
-            { c, on -> if (on) c.applyDozeZero() else c.restoreDozeZero() },
-            { it.dozeZero },
+            { c, on -> c.setTweak(OptimizerTweak.DOZE_ZERO, on) },
+            { OptimizerTweak.DOZE_ZERO in it },
             on = job(
                 "Applying Zero Maintenance Standby...",
                 batch(
@@ -226,8 +227,8 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "backgroundDrainMonitor",
-            { c, on -> c.setBackgroundDrainMonitor(on) },
-            { it.backgroundDrainMonitor },
+            { c, on -> c.setTweak(OptimizerTweak.BACKGROUND_DRAIN_MONITOR, on) },
+            { OptimizerTweak.BACKGROUND_DRAIN_MONITOR in it },
             on = job(
                 "Updating background drain monitor...",
                 batch("device_config put background_install_control bg_current_drain_monitor_enable true"),
@@ -241,8 +242,8 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "lockRefreshRate60",
-            { c, on -> c.setLockRefreshRate60(on) },
-            { it.lockRefreshRate60 },
+            { c, on -> c.setTweak(OptimizerTweak.LOCK_REFRESH_RATE_60, on) },
+            { OptimizerTweak.LOCK_REFRESH_RATE_60 in it },
             on = job(
                 "Updating display refresh rate...",
                 batch("settings put system peak_refresh_rate 60.0", "settings put system min_refresh_rate 60.0"),
@@ -256,15 +257,15 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "disableWindowBlurs",
-            { c, on -> c.setDisableWindowBlurs(on) },
-            { it.disableWindowBlurs },
+            { c, on -> c.setTweak(OptimizerTweak.DISABLE_WINDOW_BLURS, on) },
+            { OptimizerTweak.DISABLE_WINDOW_BLURS in it },
             on = job("Updating window blurs...", batch("settings put global disable_window_blurs 1"), "Disabled window blurs."),
             off = job("Updating window blurs...", batch("settings put global disable_window_blurs 0"), "Enabled window blurs.")
         ),
         OptimizerToggleCase(
             "superDim",
-            { c, on -> if (on) c.applySuperDim() else c.restoreSuperDim() },
-            { it.superDim },
+            { c, on -> c.setTweak(OptimizerTweak.SUPER_DIM, on) },
+            { OptimizerTweak.SUPER_DIM in it },
             on = job(
                 "Applying Super Dim matrix...",
                 batch("settings put secure accessibility_display_color_matrix $superDimMatrix"),
@@ -278,8 +279,8 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "samsungCpuBoosterOff",
-            { c, disabled -> c.setSamsungCpuResponsiveness(!disabled) },
-            { it.samsungCpuBoosterOff },
+            { c, on -> c.setTweak(OptimizerTweak.SAMSUNG_CPU_BOOSTER_OFF, on) },
+            { OptimizerTweak.SAMSUNG_CPU_BOOSTER_OFF in it },
             on = job(
                 "Updating Samsung CPU responsiveness...",
                 batch("settings put global sem_enhanced_cpu_responsiveness 0"),
@@ -293,8 +294,8 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "samsungRamPlusOff",
-            { c, disabled -> c.setSamsungRamPlusOff(disabled) },
-            { it.samsungRamPlusOff },
+            { c, on -> c.setTweak(OptimizerTweak.SAMSUNG_RAM_PLUS_OFF, on) },
+            { OptimizerTweak.SAMSUNG_RAM_PLUS_OFF in it },
             on = job("Updating Samsung RAM Plus...", batch("settings put global ram_expand_size_list 0"), "Disabled Samsung RAM Plus."),
             off = job(
                 "Updating Samsung RAM Plus...",
@@ -304,8 +305,8 @@ class FeatureControllersTest {
         ),
         OptimizerToggleCase(
             "samsungMotionEngineOff",
-            { c, disabled -> c.setSamsungMotionEngineOff(disabled) },
-            { it.samsungMotionEngineOff },
+            { c, on -> c.setTweak(OptimizerTweak.SAMSUNG_MOTION_ENGINE_OFF, on) },
+            { OptimizerTweak.SAMSUNG_MOTION_ENGINE_OFF in it },
             on = job(
                 "Updating Samsung Motion Engine...",
                 batch("settings put system motion_engine 0"),
