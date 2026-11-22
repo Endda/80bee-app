@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.R
 import com.eightbee.app.features.DeviceTweaksController
@@ -27,16 +26,9 @@ fun BluetoothRepairScreen(controller: DeviceTweaksController, onBack: () -> Unit
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text(
+        ToolSectionHeader(
             stringResource(R.string.bt_oem_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.bt_oem_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            stringResource(R.string.bt_oem_desc)
         )
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -58,67 +50,33 @@ fun BluetoothRepairScreen(controller: DeviceTweaksController, onBack: () -> Unit
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            stringResource(R.string.bt_routines_header),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        ToolSectionHeader(stringResource(R.string.bt_routines_header))
         Spacer(modifier = Modifier.height(12.dp))
 
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                stringResource(R.string.bt_standard_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+        ToolActionList(
+            listOf(
+                ToolAction(
+                    R.string.bt_standard_title,
+                    R.string.bt_standard_desc,
+                    R.string.bt_standard_button,
+                    onClick = { controller.executeBluetoothRepair(selectedOem, false) }
+                ),
+                ToolAction(
+                    R.string.bt_advanced_title,
+                    R.string.bt_advanced_desc,
+                    R.string.bt_advanced_button,
+                    ActionEmphasis.Tonal,
+                    onClick = { controller.executeBluetoothRepair(selectedOem, true) }
+                )
             )
-            Text(
-                stringResource(R.string.bt_standard_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = { controller.executeBluetoothRepair(selectedOem, false) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.bt_standard_button))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                stringResource(R.string.bt_advanced_title),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                stringResource(R.string.bt_advanced_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            FilledTonalButton(
-                onClick = { controller.executeBluetoothRepair(selectedOem, true) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.bt_advanced_button))
-            }
-        }
+        )
 
         if (selectedOem == "xiaomi" || selectedOem == "oneplus") {
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                stringResource(R.string.bt_quirks_header),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            ToolSectionHeader(stringResource(R.string.bt_quirks_header))
             Spacer(modifier = Modifier.height(12.dp))
 
             if (selectedOem == "xiaomi") {

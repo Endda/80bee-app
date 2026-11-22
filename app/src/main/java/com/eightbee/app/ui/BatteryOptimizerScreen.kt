@@ -6,7 +6,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -120,9 +119,9 @@ fun BatteryOptimizerScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        OptimizerSectionHeader(
-            titleRes = R.string.battery_opt_standby_header,
-            descriptionRes = R.string.battery_opt_standby_desc
+        ToolSectionHeader(
+            stringResource(R.string.battery_opt_standby_header),
+            stringResource(R.string.battery_opt_standby_desc)
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -162,7 +161,7 @@ fun BatteryOptimizerScreen(
 
         HorizontalDivider(modifier = Modifier.padding(top = 24.dp, bottom = 16.dp))
 
-        OptimizerSectionHeader(titleRes = R.string.battery_opt_deep_header)
+        ToolSectionHeader(stringResource(R.string.battery_opt_deep_header))
         Spacer(modifier = Modifier.height(12.dp))
         OptimizerToggleGroup(
             toggles = DEEP_SYSTEM_TOGGLES,
@@ -172,10 +171,10 @@ fun BatteryOptimizerScreen(
 
         HorizontalDivider(modifier = Modifier.padding(top = 24.dp, bottom = 16.dp))
 
-        OptimizerSectionHeader(
-            titleRes = R.string.battery_opt_samsung_header,
-            descriptionRes = R.string.battery_opt_samsung_desc,
-            descriptionColor = MaterialTheme.colorScheme.secondary
+        ToolSectionHeader(
+            stringResource(R.string.battery_opt_samsung_header),
+            stringResource(R.string.battery_opt_samsung_desc),
+            subtitleColor = MaterialTheme.colorScheme.secondary
         )
         Spacer(modifier = Modifier.height(16.dp))
         OptimizerToggleGroup(
@@ -186,9 +185,9 @@ fun BatteryOptimizerScreen(
 
         HorizontalDivider(modifier = Modifier.padding(top = 24.dp, bottom = 16.dp))
 
-        OptimizerSectionHeader(
-            titleRes = R.string.battery_opt_art_header,
-            descriptionRes = R.string.battery_opt_art_desc
+        ToolSectionHeader(
+            stringResource(R.string.battery_opt_art_header),
+            stringResource(R.string.battery_opt_art_desc)
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -219,27 +218,6 @@ fun BatteryOptimizerScreen(
                 Text(stringResource(R.string.battery_opt_cancel_compile))
             }
         }
-    }
-}
-
-@Composable
-private fun OptimizerSectionHeader(
-    @StringRes titleRes: Int,
-    @StringRes descriptionRes: Int? = null,
-    descriptionColor: Color = MaterialTheme.colorScheme.onSurfaceVariant
-) {
-    Text(
-        stringResource(titleRes),
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
-    )
-    if (descriptionRes != null) {
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            stringResource(descriptionRes),
-            style = MaterialTheme.typography.bodySmall,
-            color = descriptionColor
-        )
     }
 }
 

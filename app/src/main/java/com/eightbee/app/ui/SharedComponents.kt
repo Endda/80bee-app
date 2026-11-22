@@ -1,10 +1,12 @@
 package com.eightbee.app.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +20,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.R
 
@@ -94,6 +100,73 @@ fun ToolIntroCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+fun ToolSectionHeader(
+    title: String,
+    subtitle: String? = null,
+    subtitleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant
+) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold
+    )
+    if (subtitle != null) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = subtitleColor
+        )
+    }
+}
+
+enum class ActionEmphasis {
+    Primary,
+    Tonal
+}
+
+class ToolAction(
+    @param:StringRes val titleRes: Int,
+    @param:StringRes val descriptionRes: Int,
+    @param:StringRes val buttonRes: Int,
+    val emphasis: ActionEmphasis = ActionEmphasis.Primary,
+    val onClick: () -> Unit
+)
+
+/** Title/description/full-width-button blocks separated by dividers. */
+@Composable
+fun ToolActionList(
+    actions: List<ToolAction>,
+    dividerSpacing: Dp = 16.dp,
+    buttonSpacing: Dp = 8.dp
+) {
+    actions.forEachIndexed { index, action ->
+        if (index > 0) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = dividerSpacing))
+        }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                stringResource(action.titleRes),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                stringResource(action.descriptionRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(buttonSpacing))
+            val buttonModifier = Modifier.fillMaxWidth()
+            val label: @Composable RowScope.() -> Unit = { Text(stringResource(action.buttonRes)) }
+            when (action.emphasis) {
+                ActionEmphasis.Primary -> Button(onClick = action.onClick, modifier = buttonModifier, content = label)
+                ActionEmphasis.Tonal -> FilledTonalButton(onClick = action.onClick, modifier = buttonModifier, content = label)
+            }
         }
     }
 }
