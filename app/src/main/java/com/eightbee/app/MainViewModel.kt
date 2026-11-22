@@ -11,22 +11,17 @@ import com.eightbee.app.connection.ShizukuConnectionManager
 import com.eightbee.app.features.BackgroundOperationCoordinator
 import com.eightbee.app.features.BatteryOptimizerController
 import com.eightbee.app.features.BootloaderWizardController
+import com.eightbee.app.features.CommandRunner
 import com.eightbee.app.features.DebloaterController
 import com.eightbee.app.features.DeviceTweaksController
 import com.eightbee.app.features.MagiskPatcherController
 import com.eightbee.app.features.SideloadController
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 data class DeviceSettings(
     val privateDnsMode: String = "unknown",
@@ -67,16 +62,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeConnection = MutableStateFlow<ConnectionManager?>(null)
     val activeConnection: StateFlow<ConnectionManager?> = _activeConnection.asStateFlow()
 
-    private val _output = MutableStateFlow("Ready.")
-    val output: StateFlow<String> = _output.asStateFlow()
-
-    private val _isExecuting = MutableStateFlow(false)
-    val isExecuting: StateFlow<Boolean> = _isExecuting.asStateFlow()
-
-    private val _snackbarEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
-    val snackbarEvents: SharedFlow<String> = _snackbarEvents.asSharedFlow()
-
-    private val executionMutex = Mutex()
+    private val commandRunner = CommandRunner(viewModelScope, connectionProvider = { _activeConnection.value })
+    val output: StateFlow<String> = commandRunner.output
+    val isExecuting: StateFlow<Boolean> = commandRunner.isExecuting
+    val snackbarEvents: SharedFlow<String> = commandRunner.snackbarEvents
 
     // Navigation State
     private val _currentScreen = MutableStateFlow(Screen.Dashboard)
@@ -86,22 +75,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val backgroundOperations: BackgroundOperationCoordinator =
         (application as EightBeeApplication).backgroundOperations
 
-    val deviceTweaksController = DeviceTweaksController(
+    val deviceTweaksController: DeviceTweaksController = DeviceTweaksController(
         application = application,
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
         backgroundOperations = backgroundOperations,
-        onOutput = { _output.value = it },
-        emitSnackbar = { _snackbarEvents.tryEmit(it) },
+        onOutput = commandRunner::show,
+        emitSnackbar = { commandRunner.report(it) },
         runExclusive = { status, notify, refresh, block ->
-            runExclusive(status, notifySnackbar = notify, refreshDeviceSettings = refresh, block = block)
+            commandRunner.run(
+                status,
+                notifySnackbar = notify,
+                afterSuccess = if (refresh) { conn -> deviceTweaksController.refreshSettingsInternal(conn) } else null,
+                block = block
+            )
         }
     )
 
     val debloaterController = DebloaterController(
         application = application,
         runExclusive = { status, notify, block ->
-            runExclusive(status, notifySnackbar = notify, block = block)
+            commandRunner.run(status, notifySnackbar = notify, block = block)
         }
     )
 
@@ -109,14 +103,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
         runExclusive = { status, notify, block ->
-            runExclusive(status, notifySnackbar = notify, block = block)
+            commandRunner.run(status, notifySnackbar = notify, block = block)
         }
     )
 
     val bootloaderWizardController = BootloaderWizardController(
         scope = viewModelScope,
         connectionProvider = { _activeConnection.value },
-        onOutput = { _output.value = it }
+        onOutput = commandRunner::show
     )
 
     val sideloadController = SideloadController(
@@ -181,45 +175,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             resetNavigation()
         }
-    }
-
-    private fun runExclusive(
-        initialStatus: String,
-        notifySnackbar: Boolean = false,
-        refreshDeviceSettings: Boolean = false,
-        block: suspend (ConnectionManager) -> String
-    ) {
-        val connection = _activeConnection.value ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            executionMutex.withLock {
-                _isExecuting.value = true
-                _output.value = initialStatus
-                try {
-                    val result = block(connection).ifBlank { "Command completed." }
-                    _output.value = result
-                    if (notifySnackbar) {
-                        _snackbarEvents.tryEmit(summarizeForSnackbar(result))
-                    }
-                    if (refreshDeviceSettings) {
-                        deviceTweaksController.refreshSettingsInternal(connection)
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    val errorMsg = "Error: ${e.message ?: "Operation failed"}"
-                    _output.value = errorMsg
-                    if (notifySnackbar) {
-                        _snackbarEvents.tryEmit(errorMsg)
-                    }
-                } finally {
-                    _isExecuting.value = false
-                }
-            }
-        }
-    }
-
-    private fun summarizeForSnackbar(result: String): String {
-        val firstLine = result.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-        return if (firstLine.length > 90) firstLine.take(87) + "..." else firstLine.ifEmpty { "Done." }
     }
 }
