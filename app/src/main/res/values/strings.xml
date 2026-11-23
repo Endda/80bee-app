@@ -26,6 +26,8 @@
     <!-- Navigation & Main Scaffold -->
     <string name="nav_home">Home</string>
     <string name="nav_advanced">Advanced</string>
+    <string name="nav_log">Log</string>
+    <string name="log_title">Command Log</string>
     <string name="nav_about">About</string>
     <string name="advanced_features_title">Advanced Features</string>
     <string name="card_app_management_title">App Management</string>
@@ -41,7 +43,27 @@
     <string name="card_bootloader_utilities_title">Bootloader Utilities</string>
     <string name="card_bootloader_utilities_desc">Unlock or lock the hardware bootloader parameters. Triggers hard data wipes.</string>
     <string name="about_version_format">Version %1$s</string>
-    <string name="about_tagline">Built with Material Design 3</string>
+    <string name="about_tagline">Root-free ADB &amp; Fastboot Toolkit</string>
+    <string name="about_contact_title">Contact &amp; Support</string>
+    <string name="about_action_more">More</string>
+    <string name="about_action_email">Email</string>
+    <string name="about_contact_body">If you have suggestions, feature requests, or run into any issues, please contact us via email. We\'re eager to improve 80bee!</string>
+    <string name="about_email_subject">80bee Feedback</string>
+    <string name="about_email_no_app">No email app found. Reach us at %1$s</string>
+    <string name="about_faq_q1">Do I need root to use 80bee?</string>
+    <string name="about_faq_a1">No. 80bee runs privileged commands through Shizuku on your own phone, or through ADB and Fastboot when another device is plugged in over USB OTG. Root is never required.</string>
+    <string name="about_faq_q2">What\'s the difference between Local and OTG mode?</string>
+    <string name="about_faq_a2">Local mode uses Shizuku to tweak the phone 80bee is installed on. OTG mode turns your phone into an ADB/Fastboot host so you can manage a second device connected with a USB OTG cable or adapter.</string>
+    <string name="about_faq_q3">How do I set up Shizuku?</string>
+    <string name="about_faq_a3">Install Shizuku from Google Play, F-Droid, or GitHub. Enable Wireless Debugging in Developer Options, start Shizuku from its app, then open 80bee and allow access when prompted. Shizuku needs to be started again after each reboot.</string>
+    <string name="about_faq_q4">My OTG device isn\'t connecting. What should I check?</string>
+    <string name="about_faq_a4">Enable USB Debugging on the target device (Settings &gt; Developer Options), use a cable or adapter that supports data, and accept both the USB permission prompt on this phone and the \"Allow USB debugging\" prompt on the target.</string>
+    <string name="about_faq_q5">Can I undo debloater changes?</string>
+    <string name="about_faq_a5">Yes. Create a backup snapshot before removing apps, then use the Debloater\'s Restore tab to re-enable or reinstall packages. Most system apps can be restored because they are only removed for the current user.</string>
+    <string name="about_faq_q6">Why are some tools greyed out?</string>
+    <string name="about_faq_a6">Tools such as the Magisk Patcher and Bootloader Utilities talk to the bootloader over Fastboot, which is only available in OTG mode with the target device connected by USB.</string>
+    <string name="about_faq_q7">Does 80bee collect my data?</string>
+    <string name="about_faq_a7">No. 80bee doesn\'t request internet access, so nothing you do in the app leaves your device. Links such as firmware downloads open in your browser.</string>
 
     <!-- Device Detection -->
     <string name="device_connections_title">Device Connections</string>

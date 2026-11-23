@@ -9,16 +9,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
@@ -28,7 +28,8 @@ import com.eightbee.app.Screen
 enum class NavItem(@param:StringRes val titleRes: Int, val icon: ImageVector) {
     Home(R.string.nav_home, Icons.Filled.Home),
     Advanced(R.string.nav_advanced, Icons.Filled.Build),
-    About(R.string.nav_about, Icons.Filled.Settings)
+    Log(R.string.nav_log, Icons.AutoMirrored.Filled.List),
+    About(R.string.nav_about, Icons.Filled.Info)
 }
 
 @Composable
@@ -76,11 +77,15 @@ fun MainScaffold(viewModel: MainViewModel, onDisconnect: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                // Mark the system-bar insets as handled so nested tool-screen Scaffolds/TopAppBars
+                // don't pad for the status bar a second time.
+                .consumeWindowInsets(paddingValues)
         ) {
             if (currentScreen == Screen.Dashboard) {
                 when (selectedItem) {
                     NavItem.Home -> DashboardScreen(viewModel, onDisconnect)
                     NavItem.Advanced -> AdvancedTab(viewModel)
+                    NavItem.Log -> LogTab(viewModel)
                     NavItem.About -> AboutTab()
                 }
             } else {
@@ -206,30 +211,5 @@ private fun AppLauncherCard(onOpenDebloater: () -> Unit, onApkPicked: (Uri) -> U
                 }
             }
         }
-    }
-}
-
-@Composable
-fun AboutTab() {
-    val context = LocalContext.current
-    val versionName = remember(context) {
-        try {
-            @Suppress("DEPRECATION")
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3"
-        } catch (_: Exception) {
-            "1.3"
-        }
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displayMedium)
-        Text(stringResource(R.string.about_version_format, versionName), style = MaterialTheme.typography.bodyLarge)
-        Spacer(modifier = Modifier.height(32.dp))
-        Text(stringResource(R.string.about_tagline), style = MaterialTheme.typography.bodySmall)
     }
 }

@@ -10,7 +10,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.eightbee.app.MainViewModel
@@ -19,7 +18,6 @@ import com.eightbee.app.Screen
 
 @Composable
 fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
-    val outputText by viewModel.output.collectAsState()
     val isExecuting by viewModel.isExecuting.collectAsState()
     val activeConnection by viewModel.activeConnection.collectAsState()
 
@@ -52,29 +50,12 @@ fun DashboardScreen(viewModel: MainViewModel, onDisconnect: () -> Unit) {
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Output Console
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            tonalElevation = 4.dp
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                if (isExecuting) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
-                }
-                Text(
-                    text = outputText,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+        // Command output lives in the Log tab; just signal activity here.
+        if (isExecuting) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         LauncherList(homeLaunchers, activeConnection?.supportsFastboot == true, viewModel)
     }
