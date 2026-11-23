@@ -2,9 +2,14 @@
 
 All notable changes to **80bee** are documented in this file.
 
-## [1.5.1] - 2026-11-22 (`versionCode 6`)
+## [1.5.1] - 2026-11-23 (`versionCode 6`)
+
+### Features
+- Added a dedicated **Log** tab for command output. The Home tab no longer shows the log above its tools, so a long run (such as Bluetooth Repair) no longer pushes the tool cards far down the screen. The log fills the screen, follows new output, and its text can be selected and copied.
+- Redesigned the **About** tab with an FAQ (root, Local vs OTG mode, Shizuku setup, OTG troubleshooting, undoing debloats, Fastboot-only tools, privacy) and a Contact & Support section with links to email and the Google Play developer page.
 
 ### Fixes
+- Removed the extra blank space above the top bar on tool screens (Battery Diagnostics, Battery Optimizer, Debloater, and others). The main screen and each tool screen were both adding room for the status bar.
 - Fixed cached files being overwritten when two were created in the same millisecond. A failed boot image load could delete the image that was already loaded in the Pixel Magisk Patcher, and two split APKs with the same file name in one archive could overwrite each other during sideload. Cache files now always get unique names.
 
 ### UI
